@@ -11,6 +11,7 @@ import type { Browser } from 'puppeteer-core';
 puppeteer.use(StealthPlugin());
 
 import { existsSync } from 'node:fs';
+import { reportUsage } from '../billing/stripe.js';
 
 function findChromeSync(): string {
   if (config.chromePath) return config.chromePath;
@@ -76,7 +77,7 @@ export class BrowserPool {
     return args;
   }
 
-  async createSession(opts: CreateSessionRequest = {}): Promise<BrowserSession> {
+  async createSession(opts: CreateSessionRequest = {}, apiKey?: string): Promise<BrowserSession> {
     if (this.sessions.size >= config.MAX_CONCURRENT_SESSIONS) {
       throw new Error(`Maximum concurrent sessions (${config.MAX_CONCURRENT_SESSIONS}) reached`);
     }
@@ -110,7 +111,7 @@ export class BrowserPool {
 
     const session = new BrowserSession(id, browser, cdpEndpoint, opts, () => {
       this.releaseSession(id).catch(() => {});
-    });
+    }, apiKey);
 
     // Set user agent if provided
     if (opts.userAgent) {
@@ -153,9 +154,16 @@ export class BrowserPool {
     const session = this.sessions.get(id);
     if (!session) return false;
 
+    const browserHours = session.getBrowserHours();
     await session.release();
     this.sessions.delete(id);
-    logger.info({ sessionId: id, browserHours: session.getBrowserHours().toFixed(4) }, 'Session released');
+    logger.info({ sessionId: id, browserHours: browserHours.toFixed(4) }, 'Session released');
+
+    // Report metered usage to Stripe (non-blocking)
+    if (session.apiKey) {
+      reportUsage(session.apiKey, browserHours).catch(() => {});
+    }
+
     return true;
   }
 

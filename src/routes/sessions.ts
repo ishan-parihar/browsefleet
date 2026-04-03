@@ -10,7 +10,8 @@ export function sessionsRoutes(pool: BrowserPool): Hono {
     const body = await c.req.json<CreateSessionRequest>().catch(() => ({}));
 
     try {
-      const session = await pool.createSession(body);
+      const apiKey = c.req.header('x-api-key');
+      const session = await pool.createSession(body, apiKey);
       return c.json(session.toApiObject(), 201);
     } catch (err: any) {
       const status = err.message?.includes('Maximum') ? 429 : 500;

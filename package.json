@@ -23,6 +23,7 @@
     "puppeteer-core": "^24.0.0",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "stripe": "^22.0.0",
     "turndown": "^7.2.0",
     "uuid": "^11.1.0",
     "ws": "^8.18.0",

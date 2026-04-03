@@ -10,6 +10,7 @@ export class BrowserSession {
   readonly createdAt: Date;
   readonly expiresAt: Date;
   readonly timeout: number;
+  readonly apiKey: string | undefined;
 
   private expiryTimer: ReturnType<typeof setTimeout>;
   private _status: 'active' | 'released' | 'expired' | 'error' = 'active';
@@ -21,12 +22,14 @@ export class BrowserSession {
     cdpEndpoint: string,
     options: CreateSessionRequest,
     onExpire: () => void,
+    apiKey?: string,
   ) {
     this.id = id;
     this.browser = browser;
     this.cdpEndpoint = cdpEndpoint;
     this.options = options;
     this.onExpire = onExpire;
+    this.apiKey = apiKey;
     this.createdAt = new Date();
     this.timeout = Math.min(
       options.timeout ?? config.DEFAULT_SESSION_TIMEOUT,
