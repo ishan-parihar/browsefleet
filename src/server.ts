@@ -15,6 +15,7 @@ import { captchaRoutes } from './routes/captcha.js';
 import { profilesRoutes } from './routes/profiles.js';
 import { filesRoutes } from './routes/files.js';
 import { billingRoutes, billingWebhookRoute } from './routes/billing.js';
+import { agentRoutes } from './routes/agent.js';
 import { mkdirSync } from 'node:fs';
 
 // ─── Logger ────────────────────────────────────────────────────────────────
@@ -75,6 +76,8 @@ app.route('/v1/sessions', captchaRoutes(pool));
 app.route('/v1/profiles', profilesRoutes());
 app.route('/v1/sessions', filesRoutes(pool));
 app.route('/v1/billing', billingRoutes());
+app.route('/v1/agent', agentRoutes(pool));
+app.route('/v1/sessions', agentRoutes(pool));
 
 // 404
 app.notFound((c) => c.json({ error: 'Not found' }, 404));

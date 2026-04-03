@@ -136,6 +136,31 @@ export interface CreateProfileRequest {
   name: string;
 }
 
+// ─── Agent Types ──────────────────────────────────────────────────────────
+
+export interface AgentRequest {
+  task: string;
+  url?: string;
+  provider?: 'anthropic' | 'openai';
+  model?: string;
+  maxIterations?: number;
+  apiKey?: string;
+}
+
+export interface AgentResult {
+  success: boolean;
+  result?: string;
+  error?: string;
+  steps: Array<{
+    iteration: number;
+    reasoning: string;
+    actions: Array<Record<string, unknown>>;
+    screenshot?: string;
+  }>;
+  totalIterations: number;
+  sessionId?: string;
+}
+
 // ─── Usage Types ───────────────────────────────────────────────────────────
 
 export interface UsageStats {

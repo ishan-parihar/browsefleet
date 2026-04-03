@@ -30,6 +30,9 @@ const schema = z.object({
   STRIPE_PRICE_ID: z.string().default(''),
   STRIPE_METER_EVENT_NAME: z.string().default('browser_hours'),
 
+  ANTHROPIC_API_KEY: z.string().default(''),
+  OPENAI_API_KEY: z.string().default(''),
+
   DATA_DIR: z.string().default('./data'),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
 });
