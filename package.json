@@ -1,0 +1,41 @@
+{
+  "name": "browsefleet",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "docker:build": "docker build -t browsefleet .",
+    "docker:run": "docker run -p 3000:3000 --shm-size=2g browsefleet"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.14.0",
+    "@mozilla/readability": "^0.5.0",
+    "better-sqlite3": "^11.8.0",
+    "dotenv": "^16.4.7",
+    "hono": "^4.7.0",
+    "jsdom": "^26.0.0",
+    "pino": "^9.6.0",
+    "pino-pretty": "^13.0.0",
+    "proxy-chain": "^2.5.0",
+    "puppeteer-core": "^24.0.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "turndown": "^7.2.0",
+    "uuid": "^11.1.0",
+    "ws": "^8.18.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/jsdom": "^28.0.1",
+    "@types/node": "^22.0.0",
+    "@types/turndown": "^5.0.0",
+    "@types/uuid": "^10.0.0",
+    "@types/ws": "^8.5.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

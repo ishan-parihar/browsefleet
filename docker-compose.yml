@@ -1,0 +1,27 @@
+services:
+  browsefleet:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - HOST=0.0.0.0
+      - MAX_CONCURRENT_SESSIONS=30
+      - STEALTH_DEFAULT=full
+      - LOG_LEVEL=info
+      - CHROME_PATH=/usr/bin/chromium
+      - DATA_DIR=/data
+      - CDP_EXTERNAL_HOST=localhost
+      - CDP_EXTERNAL_PORT=3000
+      - CDP_EXTERNAL_SCHEME=ws
+    volumes:
+      - browsefleet-data:/data
+    shm_size: '2gb'
+    deploy:
+      resources:
+        limits:
+          memory: 60G
+    restart: unless-stopped
+
+volumes:
+  browsefleet-data:
