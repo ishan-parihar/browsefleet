@@ -1,6 +1,6 @@
 import type { Context, Next } from 'hono';
 
-// In-memory sliding window rate limiter
+// In-memory fixed-window rate limiter (resets every 1 second per key)
 const windows = new Map<string, { count: number; resetAt: number }>();
 
 export function rateLimitMiddleware(defaultLimit: number = 10) {
@@ -38,4 +38,4 @@ setInterval(() => {
       windows.delete(key);
     }
   }
-}, 60_000);
+}, 60_000).unref();

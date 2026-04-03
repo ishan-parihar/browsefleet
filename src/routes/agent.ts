@@ -14,12 +14,13 @@ export function agentRoutes(pool: BrowserPool): Hono {
     const body = await c.req.json<AgentRequest>().catch(() => null);
     if (!body?.task) return c.json({ error: 'task is required' }, 400);
 
+    const apiKey = c.req.header('x-api-key');
     let session;
     try {
       session = await pool.createSession({
         stealth: 'full',
         viewport: { width: 1280, height: 900 },
-      });
+      }, apiKey);
     } catch (err: any) {
       return c.json({ error: `Failed to create session: ${err.message}` }, 500);
     }
@@ -78,12 +79,13 @@ export function agentRoutes(pool: BrowserPool): Hono {
     const body = await c.req.json<AgentRequest>().catch(() => null);
     if (!body?.task) return c.json({ error: 'task is required' }, 400);
 
+    const apiKey = c.req.header('x-api-key');
     let session;
     try {
       session = await pool.createSession({
         stealth: 'full',
         viewport: { width: 1280, height: 900 },
-      });
+      }, apiKey);
     } catch (err: any) {
       return c.json({ error: `Failed to create session: ${err.message}` }, 500);
     }

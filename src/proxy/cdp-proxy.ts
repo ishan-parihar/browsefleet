@@ -1,4 +1,5 @@
 import { WebSocket, WebSocketServer } from 'ws';
+import { timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type { BrowserPool } from '../pool/browser-pool.js';
@@ -28,7 +29,12 @@ export function createCdpProxy(pool: BrowserPool): (req: IncomingMessage, socket
       const logUrl = new URL(url.toString());
       logUrl.searchParams.delete('apiKey');
       logger.debug({ url: logUrl.toString() }, 'CDP upgrade request');
-      if (!apiKey || !config.apiKeys.includes(apiKey)) {
+      const keyValid = apiKey && config.apiKeys.some((k) => {
+        const a = Buffer.from(apiKey);
+        const b = Buffer.from(k);
+        return a.length === b.length && timingSafeEqual(a, b);
+      });
+      if (!keyValid) {
         socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
         socket.destroy();
         return;

@@ -88,10 +88,14 @@ export function billingRoutes(): Hono {
         try {
           const stripe = getStripe();
           const item = await stripe.subscriptionItems.retrieve(row.stripe_subscription_item_id);
-          currentPeriod = {
-            start: new Date(item.current_period_start * 1000).toISOString(),
-            end: new Date(item.current_period_end * 1000).toISOString(),
-          };
+          // Stripe v22 moved current_period to SubscriptionItem
+          const si = item as any;
+          if (si.current_period_start && si.current_period_end) {
+            currentPeriod = {
+              start: new Date(si.current_period_start * 1000).toISOString(),
+              end: new Date(si.current_period_end * 1000).toISOString(),
+            };
+          }
         } catch {
           // Subscription may have been deleted; ignore
         }
