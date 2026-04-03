@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { BrowserPool } from '../pool/browser-pool.js';
 import type { ScrapeRequest } from '../types.js';
 import { extractContent } from '../extract/content.js';
+import { validateUrl } from '../utils/url-validator.js';
 
 export function scrapeRoutes(pool: BrowserPool): Hono {
   const app = new Hono();
@@ -11,6 +12,7 @@ export function scrapeRoutes(pool: BrowserPool): Hono {
     if (!body?.url) return c.json({ error: 'url is required' }, 400);
 
     try {
+      await validateUrl(body.url);
       const result = await pool.withEphemeralContext(async (page) => {
         if (body.cookies?.length) {
           await page.setCookie(...body.cookies.map(ck => ({ ...ck, path: '/' })));
@@ -21,13 +23,13 @@ export function scrapeRoutes(pool: BrowserPool): Hono {
 
         const response = await page.goto(body.url, {
           waitUntil: 'networkidle2',
-          timeout: body.timeout ?? 30_000,
+          timeout: Math.min(body.timeout ?? 30_000, 120_000),
         });
 
         if (typeof body.waitFor === 'string') {
           await page.waitForSelector(body.waitFor, { timeout: 10_000 }).catch(() => {});
         } else if (typeof body.waitFor === 'number') {
-          await new Promise(r => setTimeout(r, body.waitFor as number));
+          await new Promise(r => setTimeout(r, Math.min(body.waitFor as number, 30_000)));
         }
 
         const html = await page.content();

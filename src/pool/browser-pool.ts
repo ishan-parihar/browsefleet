@@ -10,8 +10,9 @@ import type { Browser } from 'puppeteer-core';
 
 puppeteer.use(StealthPlugin());
 
-import { existsSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
 import { reportUsage } from '../billing/stripe.js';
+import { getStealthArgs, randomViewport, randomUserAgent } from '../stealth/stealth.js';
 
 function findChromeSync(): string {
   if (config.chromePath) return config.chromePath;
@@ -52,6 +53,7 @@ export class BrowserPool {
   }
 
   private buildArgs(opts: CreateSessionRequest): string[] {
+    const stealth = opts.stealth ?? config.STEALTH_DEFAULT;
     const args = [
       '--no-sandbox',
       '--disable-setuid-sandbox',
@@ -61,6 +63,7 @@ export class BrowserPool {
       '--disable-renderer-backgrounding',
       '--disable-features=TranslateUI',
       '--disable-ipc-flooding-protection',
+      ...getStealthArgs(stealth),
     ];
 
     if (opts.proxyUrl) {
@@ -113,6 +116,17 @@ export class BrowserPool {
       this.releaseSession(id).catch(() => {});
     }, apiKey);
 
+    // Apply stealth fingerprinting when stealth is 'full'
+    if (stealth === 'full') {
+      const page = await session.getPage();
+      if (!opts.userAgent) {
+        await page.setUserAgent(randomUserAgent());
+      }
+      if (!opts.viewport) {
+        await page.setViewport(randomViewport());
+      }
+    }
+
     // Set user agent if provided
     if (opts.userAgent) {
       const page = await session.getPage();
@@ -157,6 +171,11 @@ export class BrowserPool {
     const browserHours = session.getBrowserHours();
     await session.release();
     this.sessions.delete(id);
+
+    // Clean up temporary upload/download directories
+    try { rmSync(`/tmp/bf-uploads-${id}`, { recursive: true, force: true }); } catch {}
+    try { rmSync(`/tmp/bf-downloads-${id}`, { recursive: true, force: true }); } catch {}
+
     logger.info({ sessionId: id, browserHours: browserHours.toFixed(4) }, 'Session released');
 
     // Report metered usage to Stripe (non-blocking)

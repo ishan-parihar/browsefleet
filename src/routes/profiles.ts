@@ -23,6 +23,8 @@ function listProfiles(): Profile[] {
     .filter(Boolean) as Profile[];
 }
 
+const UUID_RE = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
+
 export function profilesRoutes(): Hono {
   const app = new Hono();
 
@@ -48,13 +50,16 @@ export function profilesRoutes(): Hono {
   });
 
   app.get('/:id', (c) => {
-    const profile = getProfileMeta(c.req.param('id'));
+    const id = c.req.param('id');
+    if (!UUID_RE.test(id)) return c.json({ error: 'Invalid profile ID' }, 400);
+    const profile = getProfileMeta(id);
     if (!profile) return c.json({ error: 'Profile not found' }, 404);
     return c.json(profile);
   });
 
   app.delete('/:id', (c) => {
     const id = c.req.param('id');
+    if (!UUID_RE.test(id)) return c.json({ error: 'Invalid profile ID' }, 400);
     const dir = `${profilesDir()}/${id}`;
     if (!existsSync(dir)) return c.json({ error: 'Profile not found' }, 404);
     rmSync(dir, { recursive: true });

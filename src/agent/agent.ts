@@ -2,6 +2,7 @@ import type { Page } from 'puppeteer-core';
 import { SYSTEM_PROMPT, buildUserMessage } from './prompt.js';
 import { config } from '../config.js';
 import { logger } from '../server.js';
+import { validateUrl } from '../utils/url-validator.js';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -154,6 +155,7 @@ function parseAgentResponse(text: string): { actions: AgentAction[]; reasoning: 
 async function executeAction(page: Page, action: AgentAction): Promise<void> {
   switch (action.type) {
     case 'navigate':
+      await validateUrl(action.url);
       await page.goto(action.url, { waitUntil: 'networkidle2', timeout: 30_000 });
       break;
     case 'click':
@@ -200,6 +202,7 @@ export async function runAgent(page: Page, request: AgentRequest): Promise<Agent
 
   // Navigate to initial URL if provided
   if (request.url) {
+    await validateUrl(request.url);
     await page.goto(request.url, { waitUntil: 'networkidle2', timeout: 30_000 });
     await new Promise(r => setTimeout(r, 1000));
   }

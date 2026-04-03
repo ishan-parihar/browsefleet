@@ -3,6 +3,7 @@ import type { BrowserPool } from '../pool/browser-pool.js';
 import { config } from '../config.js';
 import { logger } from '../server.js';
 import type { CaptchaSolveRequest, CaptchaSolveResponse } from '../types.js';
+import { getOwnedSession } from '../utils/session-auth.js';
 
 export function captchaRoutes(pool: BrowserPool): Hono {
   const app = new Hono();
@@ -12,8 +13,10 @@ export function captchaRoutes(pool: BrowserPool): Hono {
       return c.json({ error: 'CAPTCHA solving not configured. Set CAPTCHA_API_KEY.' }, 501);
     }
 
-    const session = pool.getSession(c.req.param('id'));
-    if (!session) return c.json({ error: 'Session not found' }, 404);
+    const apiKey = c.req.header('x-api-key');
+    let session;
+    try { session = getOwnedSession(pool, c.req.param('id'), apiKey); }
+    catch (e: any) { return c.json({ error: e.message }, e.status ?? 404); }
 
     const body = await c.req.json<CaptchaSolveRequest>().catch(() => ({} as CaptchaSolveRequest));
     const page = await session.getPage();

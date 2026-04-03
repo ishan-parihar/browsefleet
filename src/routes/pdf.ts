@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { BrowserPool } from '../pool/browser-pool.js';
 import type { PdfRequest } from '../types.js';
+import { validateUrl } from '../utils/url-validator.js';
 
 export function pdfRoutes(pool: BrowserPool): Hono {
   const app = new Hono();
@@ -10,16 +11,17 @@ export function pdfRoutes(pool: BrowserPool): Hono {
     if (!body?.url) return c.json({ error: 'url is required' }, 400);
 
     try {
+      await validateUrl(body.url);
       const result = await pool.withEphemeralContext(async (page) => {
         await page.goto(body.url, {
           waitUntil: 'networkidle2',
-          timeout: body.timeout ?? 30_000,
+          timeout: Math.min(body.timeout ?? 30_000, 120_000),
         });
 
         if (typeof body.waitFor === 'string') {
           await page.waitForSelector(body.waitFor, { timeout: 10_000 }).catch(() => {});
         } else if (typeof body.waitFor === 'number') {
-          await new Promise(r => setTimeout(r, body.waitFor as number));
+          await new Promise(r => setTimeout(r, Math.min(body.waitFor as number, 30_000)));
         }
 
         const buf = await page.pdf({

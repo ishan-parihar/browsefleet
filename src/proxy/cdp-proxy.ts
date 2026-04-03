@@ -20,9 +20,14 @@ export function createCdpProxy(pool: BrowserPool): (req: IncomingMessage, socket
 
     const sessionId = match[1];
 
-    // Auth check
+    // Auth check — apiKey in query string is necessary for WebSocket clients
+    // that cannot set custom HTTP headers (e.g. browser WebSocket API)
     if (config.authEnabled) {
       const apiKey = url.searchParams.get('apiKey') ?? req.headers['x-api-key'] as string;
+      // Strip apiKey from logged URL to avoid leaking credentials
+      const logUrl = new URL(url.toString());
+      logUrl.searchParams.delete('apiKey');
+      logger.debug({ url: logUrl.toString() }, 'CDP upgrade request');
       if (!apiKey || !config.apiKeys.includes(apiKey)) {
         socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
         socket.destroy();

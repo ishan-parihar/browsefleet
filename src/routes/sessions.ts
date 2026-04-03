@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { BrowserPool } from '../pool/browser-pool.js';
 import type { CreateSessionRequest, ReleaseRequest } from '../types.js';
+import { getOwnedSession } from '../utils/session-auth.js';
 
 export function sessionsRoutes(pool: BrowserPool): Hono {
   const app = new Hono();
@@ -19,75 +20,111 @@ export function sessionsRoutes(pool: BrowserPool): Hono {
     }
   });
 
-  // List sessions
+  // List sessions (filtered by requesting API key)
   app.get('/', (c) => {
-    const sessions = pool.listSessions().map(s => s.toApiObject());
+    const apiKey = c.req.header('x-api-key');
+    const sessions = pool.listSessions()
+      .filter(s => !s.apiKey || !apiKey || s.apiKey === apiKey)
+      .map(s => s.toApiObject());
     return c.json({ sessions, count: sessions.length });
   });
 
   // Get session
   app.get('/:id', (c) => {
-    const session = pool.getSession(c.req.param('id'));
-    if (!session) return c.json({ error: 'Session not found' }, 404);
+    const apiKey = c.req.header('x-api-key');
+    let session;
+    try { session = getOwnedSession(pool, c.req.param('id'), apiKey); }
+    catch (e: any) { return c.json({ error: e.message }, e.status ?? 404); }
     return c.json(session.toApiObject());
   });
 
   // Release session
   app.post('/:id/release', async (c) => {
+    const apiKey = c.req.header('x-api-key');
+    try { getOwnedSession(pool, c.req.param('id'), apiKey); }
+    catch (e: any) { return c.json({ error: e.message }, e.status ?? 404); }
     const released = await pool.releaseSession(c.req.param('id'));
     if (!released) return c.json({ error: 'Session not found' }, 404);
     return c.json({ released: true });
   });
 
-  // Release all or batch
+  // Release all or batch (only caller's sessions)
   app.post('/release', async (c) => {
+    const apiKey = c.req.header('x-api-key');
     const body = await c.req.json<ReleaseRequest>().catch(() => ({} as ReleaseRequest));
 
     if (body.ids && body.ids.length > 0) {
       let count = 0;
       for (const id of body.ids) {
+        try { getOwnedSession(pool, id, apiKey); }
+        catch { continue; }
         if (await pool.releaseSession(id)) count++;
       }
       return c.json({ released: count });
     }
 
-    const count = await pool.releaseAll();
+    // Release all sessions owned by this API key
+    let count = 0;
+    for (const s of pool.listSessions()) {
+      if (!s.apiKey || !apiKey || s.apiKey === apiKey) {
+        if (await pool.releaseSession(s.id)) count++;
+      }
+    }
     return c.json({ released: count });
   });
 
   // Live viewer (SSE — streams screenshots)
   app.get('/:id/live', async (c) => {
-    const session = pool.getSession(c.req.param('id'));
-    if (!session) return c.json({ error: 'Session not found' }, 404);
+    const apiKey = c.req.header('x-api-key');
+    let session;
+    try { session = getOwnedSession(pool, c.req.param('id'), apiKey); }
+    catch (e: any) { return c.json({ error: e.message }, e.status ?? 404); }
 
     c.header('Content-Type', 'text/event-stream');
     c.header('Cache-Control', 'no-cache');
     c.header('Connection', 'keep-alive');
 
+    let liveInterval: ReturnType<typeof setInterval> | undefined;
+    let liveTimeout: ReturnType<typeof setTimeout> | undefined;
+    let liveRunning = true;
+    let liveClosed = false;
+
     const stream = new ReadableStream({
       async start(controller) {
         const encoder = new TextEncoder();
-        let running = true;
 
-        const interval = setInterval(async () => {
-          if (!running) return;
+        const close = () => {
+          if (!liveClosed) {
+            liveClosed = true;
+            controller.close();
+          }
+        };
+
+        liveInterval = setInterval(async () => {
+          if (!liveRunning) return;
           try {
             const page = await session.getPage();
             const screenshot = await page.screenshot({ encoding: 'base64', type: 'jpeg', quality: 50 });
             controller.enqueue(encoder.encode(`data: ${JSON.stringify({ screenshot })}\n\n`));
           } catch {
-            running = false;
-            clearInterval(interval);
-            controller.close();
+            liveRunning = false;
+            clearInterval(liveInterval);
+            if (liveTimeout) clearTimeout(liveTimeout);
+            close();
           }
         }, 500);
 
         // Cleanup after 5 minutes max
-        setTimeout(() => {
-          running = false;
-          clearInterval(interval);
-          controller.close();
+        liveTimeout = setTimeout(() => {
+          liveRunning = false;
+          clearInterval(liveInterval);
+          close();
         }, 300_000);
+      },
+      cancel() {
+        liveRunning = false;
+        if (liveInterval) clearInterval(liveInterval);
+        if (liveTimeout) clearTimeout(liveTimeout);
       },
     });
 

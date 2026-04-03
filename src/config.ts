@@ -39,10 +39,12 @@ const schema = z.object({
 
 const parsed = schema.parse(process.env);
 
+const apiKeys = parsed.API_KEYS ? parsed.API_KEYS.split(',').map(k => k.trim()).filter(Boolean) : [];
+
 export const config = {
   ...parsed,
-  apiKeys: parsed.API_KEYS ? parsed.API_KEYS.split(',').map(k => k.trim()).filter(Boolean) : [],
-  authEnabled: parsed.API_KEYS.length > 0,
+  apiKeys,
+  authEnabled: apiKeys.length > 0,
   stripeEnabled: parsed.STRIPE_SECRET_KEY.length > 0,
   dataDir: path.resolve(parsed.DATA_DIR),
   chromePath: parsed.CHROME_PATH || undefined,

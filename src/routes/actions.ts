@@ -1,13 +1,17 @@
 import { Hono } from 'hono';
 import type { BrowserPool } from '../pool/browser-pool.js';
 import type { ActionRequest, ActionResponse } from '../types.js';
+import { validateUrl } from '../utils/url-validator.js';
+import { getOwnedSession } from '../utils/session-auth.js';
 
 export function actionsRoutes(pool: BrowserPool): Hono {
   const app = new Hono();
 
   app.post('/:id/actions', async (c) => {
-    const session = pool.getSession(c.req.param('id'));
-    if (!session) return c.json({ error: 'Session not found' }, 404);
+    const apiKey = c.req.header('x-api-key');
+    let session;
+    try { session = getOwnedSession(pool, c.req.param('id'), apiKey); }
+    catch (e: any) { return c.json({ error: e.message }, e.status ?? 404); }
 
     const body = await c.req.json<ActionRequest>().catch(() => null);
     if (!body?.actions?.length) return c.json({ error: 'actions array is required' }, 400);
@@ -62,6 +66,7 @@ export function actionsRoutes(pool: BrowserPool): Hono {
             break;
           }
           case 'navigate': {
+            await validateUrl(action.url);
             await page.goto(action.url, { waitUntil: 'networkidle2', timeout: 30_000 });
             const ss = await page.screenshot({ encoding: 'base64', type: 'png' });
             results.push({ type: 'navigate', success: true, screenshot: ss as string });

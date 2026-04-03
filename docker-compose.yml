@@ -20,7 +20,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 60G
+          memory: 8G
     restart: unless-stopped
 
 volumes:

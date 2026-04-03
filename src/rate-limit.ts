@@ -5,7 +5,7 @@ const windows = new Map<string, { count: number; resetAt: number }>();
 
 export function rateLimitMiddleware(defaultLimit: number = 10) {
   return async (c: Context, next: Next) => {
-    const key = c.get('apiKey') ?? c.req.header('x-forwarded-for') ?? 'anonymous';
+    const key = c.req.header('x-api-key') ?? c.req.header('x-forwarded-for') ?? 'anonymous';
     const now = Date.now();
     const windowMs = 1000;
 

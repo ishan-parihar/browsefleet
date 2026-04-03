@@ -1,9 +1,12 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { secureHeaders } from 'hono/secure-headers';
+import { bodyLimit } from 'hono/body-limit';
 import { serve } from '@hono/node-server';
 import pino from 'pino';
 import { config } from './config.js';
 import { authMiddleware } from './auth.js';
+import { rateLimitMiddleware } from './rate-limit.js';
 import { BrowserPool } from './pool/browser-pool.js';
 import { createCdpProxy } from './proxy/cdp-proxy.js';
 import { sessionsRoutes } from './routes/sessions.js';
@@ -16,6 +19,7 @@ import { profilesRoutes } from './routes/profiles.js';
 import { filesRoutes } from './routes/files.js';
 import { billingRoutes, billingWebhookRoute } from './routes/billing.js';
 import { agentRoutes } from './routes/agent.js';
+import { closeDb } from './db/schema.js';
 import { mkdirSync } from 'node:fs';
 
 // ─── Logger ────────────────────────────────────────────────────────────────
@@ -41,7 +45,12 @@ export const pool = new BrowserPool();
 const app = new Hono();
 
 // Global middleware
-app.use('*', cors());
+app.use('*', secureHeaders());
+app.use('*', cors({
+  origin: ['https://browsefleet.com', 'http://localhost:3000'],
+  allowHeaders: ['Content-Type', 'x-api-key', 'Authorization'],
+}));
+app.use('*', bodyLimit({ maxSize: 10 * 1024 * 1024 })); // 10 MB
 app.use('*', async (c, next) => {
   const start = Date.now();
   await next();
@@ -66,6 +75,9 @@ app.route('/v1/billing', billingWebhookRoute());
 // Auth middleware for all /v1 routes
 app.use('/v1/*', authMiddleware);
 
+// Rate limiting (after auth so apiKey is available)
+app.use('/v1/*', rateLimitMiddleware());
+
 // Routes
 app.route('/v1/sessions', sessionsRoutes(pool));
 app.route('/v1', scrapeRoutes(pool));
@@ -85,7 +97,8 @@ app.notFound((c) => c.json({ error: 'Not found' }, 404));
 // Error handler
 app.onError((err, c) => {
   logger.error({ error: err.message, stack: err.stack }, 'Unhandled error');
-  return c.json({ error: err.message }, 500);
+  const message = process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message;
+  return c.json({ error: message }, 500);
 });
 
 // ─── Start Server ──────────────────────────────────────────────────────────
@@ -118,6 +131,10 @@ async function shutdown(signal: string) {
 
   // Release all browser sessions
   const released = await pool.shutdown();
+
+  // Close the database
+  closeDb();
+
   logger.info('All sessions released, exiting');
 
   process.exit(0);
@@ -128,4 +145,7 @@ process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('uncaughtException', (err) => {
   logger.fatal({ error: err.message, stack: err.stack }, 'Uncaught exception');
   shutdown('uncaughtException');
+});
+process.on('unhandledRejection', (reason) => {
+  logger.error({ reason }, 'unhandled rejection');
 });

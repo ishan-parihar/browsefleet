@@ -12,6 +12,7 @@ export class BrowserSession {
   readonly timeout: number;
   readonly apiKey: string | undefined;
 
+  private releasedAt: Date | undefined;
   private expiryTimer: ReturnType<typeof setTimeout>;
   private _status: 'active' | 'released' | 'expired' | 'error' = 'active';
   private onExpire: () => void;
@@ -53,12 +54,13 @@ export class BrowserSession {
   async release(): Promise<void> {
     if (this._status !== 'active') return;
     this._status = 'released';
+    this.releasedAt = new Date();
     clearTimeout(this.expiryTimer);
     await this.browser.close().catch(() => {});
   }
 
   getBrowserHours(): number {
-    const end = this._status === 'active' ? new Date() : this.expiresAt;
+    const end = this._status === 'active' ? new Date() : (this.releasedAt ?? this.expiresAt);
     const ms = end.getTime() - this.createdAt.getTime();
     return ms / 3_600_000;
   }

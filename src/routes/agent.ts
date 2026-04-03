@@ -2,6 +2,8 @@ import { Hono } from 'hono';
 import type { BrowserPool } from '../pool/browser-pool.js';
 import { runAgent } from '../agent/agent.js';
 import type { AgentRequest } from '../agent/agent.js';
+import { getOwnedSession } from '../utils/session-auth.js';
+import { validateUrl } from '../utils/url-validator.js';
 
 export function agentRoutes(pool: BrowserPool): Hono {
   const app = new Hono();
@@ -47,8 +49,10 @@ export function agentRoutes(pool: BrowserPool): Hono {
   // Agent on existing session — uses an already-created session
   // POST /v1/sessions/:id/agent
   app.post('/:id/agent', async (c) => {
-    const session = pool.getSession(c.req.param('id'));
-    if (!session) return c.json({ error: 'Session not found' }, 404);
+    const apiKey = c.req.header('x-api-key');
+    let session;
+    try { session = getOwnedSession(pool, c.req.param('id'), apiKey); }
+    catch (e: any) { return c.json({ error: e.message }, e.status ?? 404); }
 
     const body = await c.req.json<AgentRequest>().catch(() => null);
     if (!body?.task) return c.json({ error: 'task is required' }, 400);
@@ -67,6 +71,7 @@ export function agentRoutes(pool: BrowserPool): Hono {
     return c.json({ ...result, steps: lightSteps });
   });
 
+  // TODO: refactor to reuse runAgent() with a step callback instead of duplicating the loop
   // Agent streaming — SSE stream of agent steps as they happen
   // POST /v1/agent/stream
   app.post('/stream', async (c) => {
@@ -89,8 +94,12 @@ export function agentRoutes(pool: BrowserPool): Hono {
     const stream = new ReadableStream({
       async start(controller) {
         const encoder = new TextEncoder();
+        let closed = false;
+        const safeClose = () => {
+          if (!closed) { closed = true; controller.close(); }
+        };
         const emit = (data: any) => {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+          if (!closed) controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
         };
 
         try {
@@ -98,6 +107,7 @@ export function agentRoutes(pool: BrowserPool): Hono {
 
           // Navigate if URL provided
           if (body!.url) {
+            await validateUrl(body!.url);
             await page.goto(body!.url, { waitUntil: 'networkidle2', timeout: 30_000 });
             await new Promise(r => setTimeout(r, 1000));
           }
@@ -112,7 +122,7 @@ export function agentRoutes(pool: BrowserPool): Hono {
 
           if (!llmApiKey) {
             emit({ type: 'error', error: `No API key for ${provider}` });
-            controller.close();
+            safeClose();
             return;
           }
 
@@ -218,7 +228,7 @@ export function agentRoutes(pool: BrowserPool): Hono {
             for (const action of actions) {
               try {
                 switch (action.type) {
-                  case 'navigate': await page.goto(action.url, { waitUntil: 'networkidle2', timeout: 30_000 }); break;
+                  case 'navigate': await validateUrl(action.url); await page.goto(action.url, { waitUntil: 'networkidle2', timeout: 30_000 }); break;
                   case 'click': await page.mouse.click(action.x, action.y); await new Promise(r => setTimeout(r, 300)); break;
                   case 'type': await page.keyboard.type(action.text, { delay: 35 }); break;
                   case 'press_key': await page.keyboard.press(action.key); await new Promise(r => setTimeout(r, 200)); break;
@@ -232,7 +242,7 @@ export function agentRoutes(pool: BrowserPool): Hono {
           }
         } finally {
           await poolRef.releaseSession(sessionId);
-          controller.close();
+          safeClose();
         }
       },
     });

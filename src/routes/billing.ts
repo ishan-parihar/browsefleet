@@ -151,6 +151,8 @@ export function billingWebhookRoute(): Hono {
           VALUES (?, ?, ?, ?, ?)
         `).run(newApiKey, `stripe-${customerId.slice(-8)}`, customerId, subscriptionId, subscriptionItemId ?? null);
 
+        // TODO: Deliver the API key to the customer — options: send via email,
+        // store in Stripe customer metadata, or provide a one-time retrieval endpoint.
         logger.info({ customerId, apiKey: newApiKey.slice(0, 12) + '...' }, 'New subscription — API key created');
         break;
       }
