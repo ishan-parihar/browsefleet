@@ -58,18 +58,28 @@ die() { printf 'error: %s\n' "$1" >&2; exit 1; }
 usage_hint() { printf 'help: Run `bf %s --help` for usage\n' "$1" >&2; }
 
 # ── API helpers ─────────────────────────────────────────────────────
-bf_get()  { "${CURL[@]}" "$BF_URL$1" 2>/dev/null; }
+bf_get()  { "${CURL[@]}" "$BF_URL$1" 2>/dev/null || true; }
 bf_post() {
   local body="${2:-}"
   [ -z "$body" ] && body="{}"
-  "${CURL[@]}" -X POST -H 'Content-Type: application/json' -d "$body" "$BF_URL$1" 2>/dev/null
+  "${CURL[@]}" -X POST -H 'Content-Type: application/json' -d "$body" "$BF_URL$1" 2>/dev/null || true
 }
-bf_del()  { "${CURL[@]}" -X DELETE "$BF_URL$1" 2>/dev/null; }
+bf_del()  { "${CURL[@]}" -X DELETE "$BF_URL$1" 2>/dev/null || true; }
+
+# Surface {"error": "..."} payloads from any API response.
+# Die on error; otherwise return silently so callers can assign r=$(...) cleanly.
+check_error() {
+  local r="$1"
+  local err; err=$(echo "$r" | jq -r '.error // empty' 2>/dev/null)
+  [ -n "$err" ] && die "server error: $err"
+  return 0
+}
 
 # ── Commands ────────────────────────────────────────────────────────
 
 cmd_health() {
   local r; r=$(bf_get /health)
+  check_error "$r"
   local status=$(echo "$r" | jq -r '.status')
   local version=$(echo "$r" | jq -r '.version // "unknown"')
   local uptime=$(echo "$r" | jq -r '.uptime // 0')
@@ -78,17 +88,34 @@ cmd_health() {
 
 cmd_sessions() {
   local r; r=$(bf_get /v1/sessions)
+  check_error "$r"
   local count=$(echo "$r" | jq '.sessions | length')
   [ "$count" -eq 0 ] && { printf 'sessions: 0 active sessions\n'; return; }
-  echo "$r" | jq -r '.sessions[] | [.id[0:8], (.status // "active"), (.stealth // "-"), (.createdAt // "-")[0:19]] | @tsv' | \
+  echo "$r" | jq -r '.sessions[] | [.id, (.status // "active"), (.stealth // "-"), (.createdAt // "-")[0:19]] | @tsv' | \
     while IFS=$'\t' read -r id status fp created; do
       printf '  %s  %-10s  stealth=%s  %s\n' "$id" "$status" "$fp" "$created"
     done
   printf 'help: Run `bf session view <id>` for details\n'
 }
 
+# Resolve a session-id argument that may be a prefix (8+ hex chars) to the full UUID.
+# Echoes the full id, or dies if zero/multiple matches.
+resolve_sid() {
+  local needle="$1"
+  local r; r=$(bf_get /v1/sessions)
+  check_error "$r"
+  local matches; matches=$(echo "$r" | jq -r --arg n "$needle" \
+    '[.sessions[] | select(.id | startswith($n)) | .id] | .[]')
+  local n; n=$(echo "$matches" | grep -c . || true)
+  case "$n" in
+    0) die "no session matches prefix: $needle" ;;
+    1) echo "$matches" ;;
+    *) die "ambiguous prefix '$needle' matches $n sessions" ;;
+  esac
+}
+
 cmd_session_create() {
-  local fp="" proxy="" profile="" headless="true" timeout="" stealth=""
+  local fp="" proxy="" profile="" headless="true" timeout="" stealth="" cm="" sm="" vp=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --fingerprint|-f) fp="$2"; shift 2 ;;
@@ -97,7 +124,31 @@ cmd_session_create() {
       --headless) headless="$2"; shift 2 ;;
       --timeout|-t) timeout="$2"; shift 2 ;;
       --stealth|-s) stealth="$2"; shift 2 ;;
-      *) die "unknown flag $1 for `session create`" ;;
+      --control-mode) cm="$2"; shift 2 ;;
+      --sensitive-mode) sm="$2"; shift 2 ;;
+      --viewport) vp="$2"; shift 2 ;;
+      --help|-h)
+        cat <<'EOF'
+bf session create — Create a new stealth browser session
+
+Usage: bf session create [flags]
+
+Flags:
+  --fingerprint, -f <seed>   Per-session fingerprint seed (different = different identity)
+  --proxy, -p <url>          Outbound proxy for this session
+  --profile <id>             Reuse a saved Chrome user-data directory
+  --headless <bool>          true (default) or false (operator mode)
+  --timeout, -t <ms>         Session lifetime in milliseconds
+  --stealth, -s <mode>       none | basic | full (default per STEALTH_DEFAULT)
+  --control-mode <mode>      agent (default) | operator
+  --sensitive-mode <bool>    true | false (default)
+  --viewport WxH             Viewport size (e.g. 1920x1080)
+
+Example:
+  bf session create --fingerprint jp-tokyo-001 --headless true
+EOF
+        return ;;
+      *) die "unknown flag $1 for session create" ;;
     esac
   done
 
@@ -108,48 +159,69 @@ cmd_session_create() {
   [ -n "$stealth" ] && body+="\"stealth\":\"$stealth\","
   body+="\"headless\":$headless"
   [ -n "$timeout" ] && body+=",\"timeout\":$timeout"
+  [ -n "$cm" ] && body+=",\"controlMode\":\"$cm\""
+  [ -n "$sm" ] && body+=",\"sensitiveMode\":$sm"
+  if [ -n "$vp" ]; then
+    local w="${vp%x*}" h="${vp#*x}"
+    body+=",\"viewport\":{\"width\":$w,\"height\":$h}"
+  fi
   body+="}"
 
   local r; r=$(bf_post /v1/sessions "$body")
+  check_error "$r"
   local id=$(echo "$r" | jq -r '.id')
   local cdp=$(echo "$r" | jq -r '.websocketUrl // empty')
   toon_kv "session_id" "$id" "cdp" "${cdp:-n/a}" "fingerprint" "${fp:-auto}" "headless" "$headless"
-  printf 'help: Run `bf scrape --session %s <url>` to use this session\n' "${id:0:8}"
+  printf 'help: Run `bf scrape --session %s <url>` to use this session\n' "$id"
 }
 
 cmd_session_view() {
+  case "${1:-}" in
+    --help|-h)
+      printf 'usage: bf session view <id|prefix>\ninspect a session (accepts a unique ID prefix)\n'
+      return ;;
+  esac
   [ $# -eq 0 ] && die "session view requires a session ID"
-  local id="$1"
+  local id; id=$(resolve_sid "$1")
   local r; r=$(bf_get "/v1/sessions/$id")
-  echo "$r" | jq '{id:.id, status:.status, fingerprint:.fingerprint, headless:.headless, proxy:.proxyUrl, createdAt:.createdAt, pages:(.pages // [])}'
+  check_error "$r"
+  toon_kv \
+    "id"             "$(echo "$r" | jq -r '.id')" \
+    "status"         "$(echo "$r" | jq -r '.status // "unknown"')" \
+    "fingerprint"    "$(echo "$r" | jq -r '.fingerprint // "-"')" \
+    "headless"       "$(echo "$r" | jq -r '.headless // "-"')" \
+    "control_mode"   "$(echo "$r" | jq -r '.controlMode // "agent"')" \
+    "sensitive_mode" "$(echo "$r" | jq -r '.sensitiveMode // false')" \
+    "stealth"        "$(echo "$r" | jq -r '.stealth // "-"')" \
+    "viewport"       "$(echo "$r" | jq -r '"\(.viewport.width)x\(.viewport.height)"')" \
+    "operator_mode"  "$(echo "$r" | jq -r '.operatorMode // false')" \
+    "created"        "$(echo "$r" | jq -r '.createdAt // "-"')" \
+    "expires"        "$(echo "$r" | jq -r '.expiresAt // "-"')" \
+    "cdp"            "$(echo "$r" | jq -r '.websocketUrl // "-"')" \
+    "events"         "$(echo "$r" | jq -r '.eventsUrl // "-"')" \
+    "viewer"         "$(echo "$r" | jq -r '.viewerUrl // "-"')"
 }
 
 cmd_session_release() {
+  case "${1:-}" in
+    --help|-h)
+      printf 'usage: bf session release <id|prefix>\nrelease a browser session\n'
+      return ;;
+  esac
   [ $# -eq 0 ] && die "session release requires a session ID"
-  local r; r=$(bf_post "/v1/sessions/$1/release" "{}")
+  local id; id=$(resolve_sid "$1")
+  local r; r=$(bf_post "/v1/sessions/$id/release" "{}")
+  check_error "$r"
   toon_kv "released" "$(echo "$r" | jq -r '.released')"
 }
 
 cmd_action() {
-  [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ] && { set -- placeholder --help; }
-  [ $# -lt 1 ] && die "action requires a session ID"
-  local sid="$1"; shift
-  local actions="" json=""
-  while [ $# -gt 0 ]; do
-    case "$1" in
-      --json) json="$2"; shift 2 ;;
-      --navigate) actions=$(jq -cn --arg url "$2" '[{type:"navigate",url:$url}]'); shift 2 ;;
-      --click) actions=$(jq -cn --argjson x "$2" --argjson y "$3" '[{type:"click",x:$x,y:$y}]'); shift 3 ;;
-      --type) actions=$(jq -cn --arg text "$2" '[{type:"type",text:$text}]'); shift 2 ;;
-      --key) actions=$(jq -cn --arg key "$2" '[{type:"press_key",key:$key}]'); shift 2 ;;
-      --scroll) actions=$(jq -cn --argjson dy "$2" '[{type:"scroll",deltaY:$dy}]'); shift 2 ;;
-      --wait) actions=$(jq -cn --argjson duration "$2" '[{type:"wait",duration:$duration}]'); shift 2 ;;
-      --screenshot) actions='[{"type":"screenshot"}]'; shift ;;
-      --help|-h)
-        cat <<'EOF'
+  # Allow `bf action --help` with no session id
+  if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+    cat <<'EOF'
 bf action — Execute actions in a BrowseFleet session
 
-Usage: bf action <session-id> [one action flag] | --json '<array>'
+Usage: bf action <session-id|prefix> [one action flag] | --json '<array>'
 
 Flags:
   --navigate <url>       Navigate
@@ -166,14 +238,31 @@ Examples:
   bf action <id> --click 420 300
   bf action <id> --json '[{"type":"wait","duration":1000}]'
 EOF
-        return ;;
-      *) die "unknown flag $1 for `action`; valid flags: --navigate, --click, --type, --key, --scroll, --wait, --screenshot, --json" ;;
+    return
+  fi
+  [ $# -lt 1 ] && die "action requires a session ID"
+  local sid; sid=$(resolve_sid "$1")
+  shift
+  local actions="" json=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --json) json="$2"; shift 2 ;;
+      --navigate) actions=$(jq -cn --arg url "$2" '[{type:"navigate",url:$url}]'); shift 2 ;;
+      --click) actions=$(jq -cn --argjson x "$2" --argjson y "$3" '[{type:"click",x:$x,y:$y}]'); shift 3 ;;
+      --type) actions=$(jq -cn --arg text "$2" '[{type:"type",text:$text}]'); shift 2 ;;
+      --key) actions=$(jq -cn --arg key "$2" '[{type:"press_key",key:$key}]'); shift 2 ;;
+      --scroll) actions=$(jq -cn --argjson dy "$2" '[{type:"scroll",deltaY:$dy}]'); shift 2 ;;
+      --wait) actions=$(jq -cn --argjson duration "$2" '[{type:"wait",duration:$duration}]'); shift 2 ;;
+      --screenshot) actions='[{"type":"screenshot"}]'; shift ;;
+      --help|-h) cmd_action --help; return ;;
+      *) die "unknown flag $1 for action; valid flags: --navigate, --click, --type, --key, --scroll, --wait, --screenshot, --json" ;;
     esac
   done
   [ -n "$json" ] && actions="$json"
   [ -z "$actions" ] && die "action requires one action flag or --json"
   echo "$actions" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1 || die "actions must be a non-empty JSON array"
   local r; r=$(bf_post "/v1/sessions/$sid/actions" "$(jq -cn --argjson actions "$actions" '{actions:$actions}')")
+  check_error "$r"
   local count; count=$(echo "$r" | jq '.results | length')
   printf 'results[%s]{type,success,error}:\n' "$count"
   echo "$r" | jq -r '.results[] | [.type, (.success | tostring), (.error // "")] | @tsv' | while IFS=$'\t' read -r type success error; do
@@ -182,9 +271,29 @@ EOF
 }
 
 cmd_axi() {
+  # bf axi --help: show bf-level help (before any sid)
+  if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+    cat <<'EOF'
+bf axi — Run chrome-devtools-axi against a session's CDP endpoint
+
+Usage: bf axi <session-id|prefix> <axi-command> [args]
+
+AXI must be installed globally for snappy invocations, or this will
+auto-bootstrap via `npx -y chrome-devtools-axi` (slower first call).
+
+Examples:
+  bf axi <sid> open https://example.com
+  bf axi <sid> snapshot
+  bf axi <sid> click @e5
+  bf axi <sid> type 'hello'
+EOF
+    return
+  fi
   [ $# -lt 2 ] && die "axi requires a session ID and chrome-devtools-axi command"
-  local sid="$1"; shift
+  local sid; sid=$(resolve_sid "$1")
+  shift
   local r; r=$(bf_get "/v1/sessions/$sid")
+  check_error "$r"
   local ws; ws=$(echo "$r" | jq -r '.websocketUrl // empty')
   [ -z "$ws" ] && die "session not found or websocket URL unavailable"
   # BrowseFleet may advertise localhost while the agent reaches it through
@@ -234,12 +343,12 @@ Examples:
   bf scrape -w "#content" https://spa.example.com
 EOF
         return ;;
-      -*) die "unknown flag $1 for `scrape`" ;;
+      -*) die "unknown flag $1 for scrape" ;;
       *) url="$1"; shift ;;
     esac
   done
   [ -z "$url" ] && die "scrape requires a URL"
-  [ -z "$session" ] && session=$(uuidgen 2>/dev/null || head -c 8 /dev/urandom | od -An -tx1 | tr -d ' ')
+  [ -n "$session" ] && session=$(resolve_sid "$session")
 
   local body; body=$(jq -cn \
     --arg url "$url" \
@@ -247,9 +356,11 @@ EOF
     --argjson fullpage "$fullpage" \
     --arg waitfor "$waitfor" \
     --arg waituntil "$waituntil" \
-    '{url: $url, format: $format, fullPage: $fullpage} | if $waitfor != "" then . + {waitFor: $waitfor} else . end | if $waituntil != "" then . + {waitUntil: $waituntil} else . end')
+    --arg session "$session" \
+    '{url: $url, format: $format, fullPage: $fullpage} | if $waitfor != "" then . + {waitFor: $waitfor} else . end | if $waituntil != "" then . + {waitUntil: $waituntil} else . end | if $session != "" then . + {session: $session} else . end')
 
   local r; r=$(bf_post /v1/scrape "$body")
+  check_error "$r"
   local code=$(echo "$r" | jq -r '.statusCode // .error // "unknown"')
   local title=$(echo "$r" | jq -r '.title // empty')
 
@@ -269,7 +380,8 @@ EOF
     links)
       local count=$(echo "$r" | jq '.links | length')
       toon_kv "url" "$url" "status" "$code" "links" "$count"
-      [ "$count" -gt 0 ] && echo "$r" | jq -r '.links[:20][]' | while read -r l; do printf '  %s\n' "$l"; done
+      [ "$count" -gt 0 ] && echo "$r" | jq -r '.links[:20][] | "\(.href)\t\(.text // "")"' | \
+        while IFS=$'\t' read -r href text; do printf '  %s  %s\n' "$href" "$text"; done
       [ "$count" -gt 20 ] && printf 'help: %d more links truncated\n' "$((count-20))"
       ;;
     *)
@@ -303,7 +415,7 @@ Examples:
   bf screenshot --fullpage https://example.com full.png
 EOF
         return ;;
-      -*) die "unknown flag $1 for `screenshot`" ;;
+      -*) die "unknown flag $1 for screenshot" ;;
       *)
         if [ -z "$url" ]; then url="$1"
         elif [ -z "$outfile" ]; then outfile="$1"
@@ -312,9 +424,16 @@ EOF
     esac
   done
   [ -z "$url" ] && die "screenshot requires a URL"
+  [ -n "$session" ] && session=$(resolve_sid "$session")
   [ -z "$outfile" ] && outfile="/tmp/bf-screenshot-$(date +%s).png"
 
-  local body="{\"url\":\"$url\",\"fullPage\":$fullpage,\"width\":$width,\"height\":$height}"
+  local body; body=$(jq -cn \
+    --arg url "$url" \
+    --argjson fullpage "$fullpage" \
+    --argjson width "$width" \
+    --argjson height "$height" \
+    --arg session "$session" \
+    '{url:$url, fullPage:$fullpage, width:$width, height:$height} | if $session != "" then . + {session:$session} else . end')
   "${CURL[@]}" -X POST -H 'Content-Type: application/json' -d "$body" "$BF_URL/v1/screenshot" --output "$outfile" 2>/dev/null
 
   if file "$outfile" | grep -q "PNG image"; then
@@ -337,10 +456,10 @@ bf pdf — Generate a PDF from a URL
 Usage: bf pdf [flags] <url> [output.pdf]
 
 Examples:
-  bf https://example.com report.pdf
+  bf pdf https://example.com report.pdf
 EOF
         return ;;
-      -*) die "unknown flag $1 for `pdf`" ;;
+      -*) die "unknown flag $1 for pdf" ;;
       *)
         if [ -z "$url" ]; then url="$1"
         elif [ -z "$outfile" ]; then outfile="$1"
@@ -349,9 +468,11 @@ EOF
     esac
   done
   [ -z "$url" ] && die "pdf requires a URL"
+  [ -n "$session" ] && session=$(resolve_sid "$session")
   [ -z "$outfile" ] && outfile="/tmp/bf-pdf-$(date +%s).pdf"
 
-  local body="{\"url\":\"$url\"}"
+  local body; body=$(jq -cn --arg url "$url" --arg session "$session" \
+    '{url:$url} | if $session != "" then . + {session:$session} else . end')
   "${CURL[@]}" -X POST -H 'Content-Type: application/json' -d "$body" "$BF_URL/v1/pdf" --output "$outfile" 2>/dev/null
 
   if file "$outfile" | grep -qi "pdf"; then
@@ -364,61 +485,133 @@ EOF
 }
 
 cmd_click() {
-  [ $# -lt 2 ] && die "click requires a session ID and selector"
-  local sid="$1" sel="$2"
-  local r; r=$(bf_post "/v1/sessions/$sid/click" "{\"selector\":\"$sel\"}")
-  toon_kv "clicked" "$sel" "session" "$sid"
+  case "${1:-}" in
+    --help|-h)
+      cat <<'EOF'
+bf click — Click at x,y coordinates in a session
+
+Usage: bf click <sid|prefix> <x> <y>
+
+Note: the actions API uses mouse coordinates, not CSS selectors.
+To click a CSS element, get its bounding box via AXI and feed the
+coordinates here. Example:
+  bf axi <sid> snapshot
+  bf click <sid> 420 300
+EOF
+      return ;;
+  esac
+  [ $# -lt 3 ] && die "click requires a session ID, x, and y"
+  local sid; sid=$(resolve_sid "$1")
+  local x="$2" y="$3"
+  local body; body=$(jq -cn --argjson x "$x" --argjson y "$y" '{actions:[{type:"click",x:$x,y:$y}]}')
+  local r; r=$(bf_post "/v1/sessions/$sid/actions" "$body")
+  check_error "$r"
+  local ok; ok=$(echo "$r" | jq -r '.results[0].success')
+  toon_kv "session" "$sid" "clicked" "[$x,$y]" "success" "$ok"
 }
 
 cmd_fill() {
-  [ $# -lt 3 ] && die "fill requires a session ID, selector, and value"
-  local sid="$1" sel="$2" val="$3"
-  local body; body=$(jq -n --arg s "$sel" --arg v "$val" '{selector:$s, value:$v}')
-  local r; r=$(bf_post "/v1/sessions/$sid/fill" "$body")
-  toon_kv "filled" "$sel" "session" "$sid"
+  case "${1:-}" in
+    --help|-h)
+      cat <<'EOF'
+bf fill — Type text into the currently focused element
+
+Usage: bf fill <sid|prefix> <text>
+
+The action API types into the focused element. To fill a specific
+selector, focus it first (bf axi <sid> focus <sel>), then call bf fill.
+EOF
+      return ;;
+  esac
+  [ $# -lt 2 ] && die "fill requires a session ID and text"
+  local sid; sid=$(resolve_sid "$1")
+  local val="$2"
+  local body; body=$(jq -cn --arg v "$val" '{actions:[{type:"type",text:$v}]}')
+  local r; r=$(bf_post "/v1/sessions/$sid/actions" "$body")
+  check_error "$r"
+  local ok; ok=$(echo "$r" | jq -r '.results[0].success')
+  toon_kv "session" "$sid" "typed_chars" "${#val}" "success" "$ok"
 }
 
 cmd_navigate() {
+  case "${1:-}" in
+    --help|-h)
+      printf 'usage: bf navigate <sid|prefix> <url>\nnavigate a session to a URL (wraps POST /actions with type:navigate)\n'
+      return ;;
+  esac
   [ $# -lt 2 ] && die "navigate requires a session ID and URL"
-  local sid="$1" url="$2"
-  local r; r=$(bf_post "/v1/sessions/$sid/navigate" "{\"url\":\"$url\"}")
-  toon_kv "navigated" "$url" "session" "$sid"
+  local sid; sid=$(resolve_sid "$1")
+  local url="$2"
+  local body; body=$(jq -cn --arg url "$url" '{actions:[{type:"navigate",url:$url}]}')
+  local r; r=$(bf_post "/v1/sessions/$sid/actions" "$body")
+  check_error "$r"
+  local ok; ok=$(echo "$r" | jq -r '.results[0].success')
+  toon_kv "session" "$sid" "url" "$url" "success" "$ok"
 }
 
 cmd_console() {
-  local sid="" limit="20"
+  case "${1:-}" in
+    --help|-h)
+      cat <<'EOF'
+bf console — Read console log entries from a session
+
+Usage: bf console <sid|prefix>
+
+NOTE: this command requires the server to emit `console` events on the
+SSE /v1/sessions/:id/events stream. The current server only emits
+`snapshot` events, so this returns zero logs by design. Use bf axi
+<sid> evaluate '() => console.history' to inspect the browser-side
+console buffer over CDP.
+EOF
+      return ;;
+  esac
+  local sid=""
   while [ $# -gt 0 ]; do
     case "$1" in
-      --limit|-n) limit="$2"; shift 2 ;;
-      --help|-h) cat <<'EOF'
-bf console — Get browser console logs
-
-Usage: bf console <session-id> [--limit N]
-EOF
-        return ;;
+      --limit|-n) shift 2 ;;
+      --timeout|-t) shift 2 ;;
       *) sid="$1"; shift ;;
     esac
   done
   [ -z "$sid" ] && die "console requires a session ID"
-  local r; r=$(bf_get "/v1/sessions/$sid/console?limit=$limit")
-  local count=$(echo "$r" | jq 'length')
+  sid=$(resolve_sid "$sid")
+  local raw; raw=$(timeout 2 "${CURL[@]}" -N --max-time 2 "$BF_URL/v1/sessions/$sid/events" 2>/dev/null || true)
+  local count; count=$(echo "$raw" | awk '/^event: console/' | wc -l)
   toon_kv "session" "$sid" "logs" "$count"
-  echo "$r" | jq -r '.[] | "  [\(.type)] \(.text[0:200])"' 2>/dev/null
+  printf 'note: server currently only emits `snapshot` events on /events\n'
+  printf 'hint: bf axi %s evaluate "() => console.log.length" reads the browser buffer\n' "$sid"
 }
 
 cmd_network() {
-  local sid="" limit="20"
+  case "${1:-}" in
+    --help|-h)
+      cat <<'EOF'
+bf network — Read network requests from a session
+
+Usage: bf network <sid|prefix>
+
+NOTE: this command requires the server to emit `request` events on the
+SSE /v1/sessions/:id/events stream. The current server only emits
+`snapshot` events, so this returns zero requests by design. Use bf axi
+<sid> evaluate '() => performance.getEntriesByType("resource").length'
+to count browser-side network activity over CDP.
+EOF
+      return ;;
+  esac
+  local sid=""
   while [ $# -gt 0 ]; do
     case "$1" in
-      --limit|-n) limit="$2"; shift 2 ;;
+      --limit|-n) shift 2 ;;
+      --timeout|-t) shift 2 ;;
       *) sid="$1"; shift ;;
     esac
   done
   [ -z "$sid" ] && die "network requires a session ID"
-  local r; r=$(bf_get "/v1/sessions/$sid/network?limit=$limit")
-  local count=$(echo "$r" | jq 'length')
+  sid=$(resolve_sid "$sid")
+  local raw; raw=$(timeout 2 "${CURL[@]}" -N --max-time 2 "$BF_URL/v1/sessions/$sid/events" 2>/dev/null || true)
+  local count; count=$(echo "$raw" | awk '/^event: request/' | wc -l)
   toon_kv "session" "$sid" "requests" "$count"
-  echo "$r" | jq -r '.[] | "  \(.method // "GET") \(.url[0:80]) → \(.status // "?")"' 2>/dev/null
+  printf 'note: server currently only emits `snapshot` events on /events\n'
 }
 
 # ── Help ────────────────────────────────────────────────────────────
@@ -436,18 +629,18 @@ commands[15]:
   health                        Check BrowseFleet status
   sessions                      List active browser sessions
   session create [flags]        Create a new browser session
-  session view <id>             Inspect a session
-  session release <id>          Release a session
-  action <id> [flags]           Run session actions over REST
-  axi <id> <command>            Run chrome-devtools-axi over session CDP
+  session view <id|prefix>      Inspect a session (accepts unique 8+ char prefix)
+  session release <id|prefix>   Release a session
+  action <id|prefix> [flags]    Run session actions over REST
+  axi <id|prefix> <command>     Run chrome-devtools-axi over session CDP
   scrape [flags] <url>          Extract content from a URL
   screenshot [flags] <url>      Capture a screenshot
   pdf [flags] <url>             Generate a PDF
-  click <sid> <selector>        Click an element
-  fill <sid> <sel> <value>      Fill a form field
-  navigate <sid> <url>          Navigate a session
-  console <sid>                 Get browser console logs
-  network <sid>                 Get network requests
+  click <sid|prefix> <selector> Click an element
+  fill <sid|prefix> <sel> <val> Fill a form field
+  navigate <sid|prefix> <url>   Navigate a session
+  console <sid|prefix>          Get browser console logs
+  network <sid|prefix>          Get network requests
 
 flags[3]:
   --help, -h          Show help for any command
@@ -481,7 +674,9 @@ cmd="${1:-help}"; shift
 
 case "$cmd" in
   health)        cmd_health "$@" ;;
-  sessions)      cmd_sessions "$@" ;;
+  sessions)
+    [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ] && { printf 'usage: bf sessions\nlist active browser sessions on the server\n'; exit 0; }
+    cmd_sessions "$@" ;;
   session)
     sub="${1:-help}"; shift 2>/dev/null || true
     case "$sub" in
@@ -500,5 +695,5 @@ case "$cmd" in
   navigate)      cmd_navigate "$@" ;;
   console)       cmd_console "$@" ;;
   network)       cmd_network "$@" ;;
-  *) die "unknown command: $cmd\nhelp: Run \`bf --help\` for available commands" ;;
+  *) die "$(printf 'unknown command: %s\nhelp: Run '"'"'bf --help'"'"' for available commands' "$cmd")" ;;
 esac
