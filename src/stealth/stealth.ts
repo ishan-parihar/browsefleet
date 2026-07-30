@@ -1,26 +1,10 @@
-// Stealth configuration levels for BrowseFleet
-// none: vanilla puppeteer-core, no modifications
-// basic: puppeteer-extra-plugin-stealth with default evasions
-// full: all evasions + enhanced fingerprinting
+// ponytail: CloakBrowser handles all stealth at the C++ level —
+// canvas noise, WebGL, audio fingerprint, font enumeration, GPU spoofing,
+// WebRTC leak prevention, network timing, automation signal removal.
+// No JS evasions needed. This file only exports viewport randomization
+// for variety in session dimensions.
 
 export type StealthLevel = 'none' | 'basic' | 'full';
-
-// Additional Chrome args for stealth
-export function getStealthArgs(level: StealthLevel): string[] {
-  if (level === 'none') return [];
-
-  const args = ['--disable-blink-features=AutomationControlled'];
-
-  if (level === 'full') {
-    args.push(
-      '--disable-features=IsolateOrigins,site-per-process',
-      '--flag-switches-begin',
-      '--flag-switches-end',
-    );
-  }
-
-  return args;
-}
 
 // Random but realistic viewport dimensions
 export function randomViewport(): { width: number; height: number } {
@@ -33,16 +17,4 @@ export function randomViewport(): { width: number; height: number } {
     { width: 1600, height: 900 },
   ];
   return viewports[Math.floor(Math.random() * viewports.length)];
-}
-
-// Random realistic user agent
-export function randomUserAgent(): string {
-  const agents = [
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36',
-  ];
-  return agents[Math.floor(Math.random() * agents.length)];
 }

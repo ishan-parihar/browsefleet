@@ -166,7 +166,7 @@ browsefleet/
 │   ├── proxy/                 # CDP WebSocket proxy (transparent, bidirectional)
 │   ├── routes/                # HTTP route handlers (sessions, scrape, screenshot, pdf, actions, captcha, profiles, files, agent)
 │   ├── extract/               # HTML to markdown / readability content extraction
-│   ├── stealth/               # puppeteer-extra-plugin-stealth config + per-session randomization
+│   ├── stealth/               # CloakBrowser license + per-session viewport/UA randomization
 │   ├── db/                    # SQLite schema + helpers (better-sqlite3, WAL mode)
 │   ├── agent/                 # vision-based AI agent backend (Claude or GPT)
 │   └── utils/                 # small helpers
@@ -216,17 +216,17 @@ browsefleet/
 3. Update `src/routes/sessions.ts` POST `/v1/sessions/:id/control` to accept the new mode.
 4. Update the operator-mode docs (currently in `CLAUDE.md`; will move to `docs/operator-mode.md` in Phase 2).
 
-### Bump puppeteer-core or puppeteer-extra
+### Bump CloakBrowser or puppeteer-core
 
-1. Update `package.json`. Bump both `puppeteer-core` and `puppeteer-extra` together.
-2. Run `npm install`.
-3. Check `puppeteer-extra-plugin-stealth` is still compatible. The stealth plugin uses runtime `require()` and breaks loudly when it isn't.
+1. Bump `cloakbrowser` and `puppeteer-core` in `package.json` together. CloakBrowser's `npm install` hook downloads the patched binary; the binary auto-updates on every new install.
+2. Run `npm install`. Confirm the binary lands in `~/.cloakbrowser/chromium-<version>/chrome`.
+3. With `CLOAKBROWSER_LICENSE_KEY` set, verify the Pro binary (`chromium-<ver>-pro/chrome`) is the one being launched: `ps aux | grep chrome`.
 4. Run the full smoke test.
 
 ### Update the Docker base image
 
 1. Edit `Dockerfile`. Bump `FROM node:<version>-bookworm-slim`.
-2. Verify Chromium is still installed via apt (Debian Bookworm package name is `chromium`).
+2. The `cloakbrowser` npm package auto-downloads the binary into `~/.cloakbrowser/`. Pre-create that directory before `USER node`, or set `CLOAKBROWSER_CACHE_DIR` to a mounted volume. Do **not** install `chromium` via apt — CloakBrowser owns the executable.
 3. Run `npm run docker:build && npm run docker:run` and re-run the smoke test against the container.
 4. Update `.nvmrc` to match if you bumped the Node major.
 
@@ -307,9 +307,9 @@ Get-NetTCPConnection -LocalPort 3000 | Select-Object OwningProcess | ForEach-Obj
 
 Or change the port: `PORT=3001 npm run dev`.
 
-### `puppeteer-extra-plugin-stealth` warns about missing evasions on startup
+### CloakBrowser prints license / update notices on startup
 
-Harmless. The plugin probes for evasions via runtime `require()` and warns when a sibling package version mismatches. The stealth defaults still apply. If you want a clean boot, bump `puppeteer-extra` and `puppeteer-extra-plugin-stealth` together (see "Common tasks").
+Harmless. The npm package probes the license key, decides between Chromium 146 free and Chromium 150 Pro, and downloads the binary on first launch. If `CLOAKBROWSER_AUTO_UPDATE=true` (default), it re-downloads whenever the upstream version changes. To pin a specific build, set `CLOAKBROWSER_AUTO_UPDATE=false` and rebuild the container.
 
 ### Sessions hang or screenshots time out under load
 

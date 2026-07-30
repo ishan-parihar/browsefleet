@@ -34,7 +34,7 @@ npm start
 Two reasons stick:
 
 1. **Pool management.** You do not write the BrowserPool, the session expiration timer, the graceful shutdown path. BrowseFleet does.
-2. **Stealth defaults.** The session is already wrapped in `puppeteer-extra-plugin-stealth` with per-session randomization. Connecting via CDP keeps the stealth properties without you re-implementing them.
+2. **Stealth defaults.** The session is already running [CloakBrowser](https://github.com/CloakHQ/CloakBrowser) Pro Chromium 150 with 71 C++ source-level patches. Connecting via CDP keeps the stealth properties without you re-implementing them.
 
 If neither of those matters to you, use raw Puppeteer or Playwright instead.
 

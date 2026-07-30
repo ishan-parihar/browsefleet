@@ -28,7 +28,7 @@ This doc describes the process model, the request lifecycle, and where state liv
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-One process. One port (3000 by default). One SQLite file. Each browser session is a child Chrome process spawned by `puppeteer-extra`, attached over CDP, and torn down on release. The `BrowserPool` caps the active count at `MAX_CONCURRENT_SESSIONS` (default 30).
+One process. One port (3000 by default). One SQLite file. Each browser session is a child CloakBrowser-patched Chromium process, attached over CDP, and torn down on release. The `BrowserPool` caps the active count at `MAX_CONCURRENT_SESSIONS` (default 30).
 
 ## Request lifecycle
 

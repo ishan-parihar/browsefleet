@@ -15,8 +15,15 @@ const schema = z.object({
   MAX_SESSION_TIMEOUT: z.coerce.number().default(86_400_000),
   CHROME_PATH: z.string().default(''),
 
+  // ponytail: STEALTH_DEFAULT is kept for API compatibility but CloakBrowser
+  // handles all stealth at the C++ level. 'none' falls back to vanilla
+  // puppeteer-core; 'basic' and 'full' both use CloakBrowser's patched binary.
   STEALTH_DEFAULT: z.enum(['none', 'basic', 'full']).default('full'),
   PROXY_URL: z.string().default(''),
+
+  // CloakBrowser config
+  CLOAKBROWSER_LICENSE_KEY: z.string().default(''),
+  CLOAKBROWSER_AUTO_UPDATE: z.coerce.boolean().default(true),
 
   CAPTCHA_API_KEY: z.string().default(''),
   CAPTCHA_PROVIDER: z.enum(['2captcha', 'anticaptcha']).default('2captcha'),

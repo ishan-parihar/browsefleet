@@ -13,12 +13,12 @@ docker-compose up    # Production with Docker
 
 ## Architecture
 
-Single Node.js process managing Chrome child processes via puppeteer-core/puppeteer-extra.
+Single Node.js process managing CloakBrowser-patched Chromium child processes via puppeteer-core.
 
 - **Hono** REST API on port 3000
 - **WebSocket** CDP proxy on the same port (`/cdp/:sessionId`)
 - **SQLite** (better-sqlite3) for usage tracking + API keys
-- **puppeteer-extra + stealth** for anti-detection
+- **CloakBrowser** for anti-detection (71 C++ patches, auto-downloads binary)
 
 ## Key Directories
 

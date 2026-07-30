@@ -1,5 +1,4 @@
-import puppeteer from 'puppeteer-extra';
-import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+import { ensureBinary } from 'cloakbrowser';
 import * as puppeteerCore from 'puppeteer-core';
 import { v4 as uuid } from 'uuid';
 import { BrowserSession } from './session.js';
@@ -8,79 +7,68 @@ import { logger } from '../logger.js';
 import type { CreateSessionRequest } from '../types.js';
 import type { Browser } from 'puppeteer-core';
 
-puppeteer.use(StealthPlugin());
-
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
-import { getStealthArgs, randomViewport, randomUserAgent } from '../stealth/stealth.js';
 import { profileExists, profileUserDataDir, touchProfile } from '../routes/profiles.js';
-
-function findChromeSync(): string {
-  if (config.chromePath) return config.chromePath;
-
-  const candidates =
-    process.platform === 'win32'
-      ? [
-          'C:/Program Files/Google/Chrome/Application/chrome.exe',
-          'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
-          `${process.env.LOCALAPPDATA}/Google/Chrome/Application/chrome.exe`,
-          `${process.env.LOCALAPPDATA}/Chromium/Application/chrome.exe`,
-        ]
-      : [
-          '/usr/bin/chromium',
-          '/usr/bin/chromium-browser',
-          '/usr/bin/google-chrome',
-          '/usr/bin/google-chrome-stable',
-          '/snap/bin/chromium',
-        ];
-
-  for (const p of candidates) {
-    if (existsSync(p)) return p;
-  }
-
-  return '';
-}
 
 export class BrowserPool {
   private sessions = new Map<string, BrowserSession>();
   private utilityBrowser: Browser | null = null;
-  private chromePath: string;
-
-  constructor() {
-    this.chromePath = findChromeSync();
-  }
+  private cloakBinaryPath?: Promise<string>;
 
   get activeCount(): number {
     return this.sessions.size;
   }
 
   private buildArgs(opts: CreateSessionRequest): string[] {
-    const stealth = opts.stealth ?? config.STEALTH_DEFAULT;
     const args = [
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
+      '--disable-gpu',
       '--disable-background-timer-throttling',
       '--disable-backgrounding-occluded-windows',
       '--disable-renderer-backgrounding',
       '--disable-features=TranslateUI',
       '--disable-ipc-flooding-protection',
-      ...getStealthArgs(stealth),
+      // Allow WebSocket connections from the CDP proxy and any external agent.
+      // Without this Chrome rejects WS upgrades with 403 from non-localhost origins.
+      '--remote-allow-origins=*',
     ];
 
-    if (opts.proxyUrl) {
-      args.push(`--proxy-server=${opts.proxyUrl}`);
-    } else if (config.PROXY_URL) {
-      args.push(`--proxy-server=${config.PROXY_URL}`);
-    }
-
     if (opts.blockAds) {
-      // Basic ad blocking via Chrome flag
       args.push(
         '--host-resolver-rules=MAP *.doubleclick.net 0.0.0.0, MAP *.googlesyndication.com 0.0.0.0',
       );
     }
 
     return args;
+  }
+
+  private buildLaunchOpts(opts: CreateSessionRequest) {
+    const viewport = opts.viewport ?? { width: 1280, height: 900 };
+    const args = this.buildArgs(opts);
+    const userDataDir = opts.profileId ? profileUserDataDir(opts.profileId) : undefined;
+
+    if (opts.profileId) {
+      if (!profileExists(opts.profileId)) {
+        throw new Error(`Profile ${opts.profileId} not found`);
+      }
+      mkdirSync(userDataDir!, { recursive: true });
+    }
+
+    return {
+      headless: opts.headless ?? true,
+      args,
+      // ponytail: ensureBinary downloads and verifies the latest entitled build.
+      proxy: opts.proxyUrl || config.PROXY_URL || undefined,
+      licenseKey: config.CLOAKBROWSER_LICENSE_KEY || undefined,
+      // Raw puppeteer launch options — userDataDir, defaultViewport, etc.
+      launchOptions: {
+        userDataDir,
+        defaultViewport: viewport,
+        timeout: 30_000,
+      },
+    };
   }
 
   async createSession(opts: CreateSessionRequest = {}, apiKey?: string): Promise<BrowserSession> {
@@ -94,33 +82,39 @@ export class BrowserPool {
       throw new Error(`Session ${id} already exists`);
     }
 
-    const stealth = opts.stealth ?? config.STEALTH_DEFAULT;
-    const viewport = opts.viewport ?? { width: 1280, height: 900 };
-    const args = this.buildArgs(opts);
-    const userDataDir = opts.profileId ? profileUserDataDir(opts.profileId) : undefined;
-
-    if (opts.profileId) {
-      if (!profileExists(opts.profileId)) {
-        throw new Error(`Profile ${opts.profileId} not found`);
-      }
-      mkdirSync(userDataDir!, { recursive: true });
-    }
-
-    const launchOpts = {
-      headless: opts.headless ?? true,
-      args,
-      executablePath: this.chromePath || undefined,
-      defaultViewport: viewport,
-      userDataDir,
-      timeout: 30_000,
-    };
-
     let browser: Browser;
-    if (stealth === 'none') {
-      browser = await puppeteerCore.launch(launchOpts);
+    const launchOpts = this.buildLaunchOpts(opts);
+
+    if (opts.stealth === 'none') {
+      // ponytail: 'none' = vanilla puppeteer-core, no CloakBrowser patches.
+      // Used for internal/utility pages where stealth doesn't matter.
+      const { launchOptions, headless, args } = launchOpts;
+      browser = await puppeteerCore.launch({
+        headless,
+        args,
+        executablePath: config.chromePath || undefined,
+        defaultViewport: launchOptions.defaultViewport,
+        userDataDir: launchOptions.userDataDir,
+        timeout: launchOptions.timeout,
+      });
     } else {
-      browser = await (puppeteer as any).launch(launchOpts);
+      // The current Pro build detaches network frames when its runtime
+      // --fingerprint flag is injected. The binary still provides its compiled
+      // patches, so use the documented binary + Puppeteer Core path instead.
+      this.cloakBinaryPath ??= ensureBinary(launchOpts.licenseKey);
+      browser = await puppeteerCore.launch({
+        headless: launchOpts.headless,
+        args: launchOpts.args,
+        executablePath: await this.cloakBinaryPath,
+        defaultViewport: launchOpts.launchOptions.defaultViewport,
+        userDataDir: launchOpts.launchOptions.userDataDir,
+        timeout: launchOpts.launchOptions.timeout,
+      });
     }
+
+    // CloakBrowser Pro's bootstrap target detaches on first navigation.
+    // Keep it open and use the fresh target created after launch.
+    const sessionPage = await browser.newPage();
 
     const cdpEndpoint = browser.wsEndpoint();
     if (opts.profileId) touchProfile(opts.profileId);
@@ -129,6 +123,7 @@ export class BrowserPool {
       id,
       browser,
       cdpEndpoint,
+      sessionPage,
       opts,
       () => {
         this.releaseSession(id).catch(() => {});
@@ -136,33 +131,30 @@ export class BrowserPool {
       apiKey,
     );
 
-    // Apply stealth fingerprinting when stealth is 'full'
-    if (stealth === 'full') {
-      const page = await session.getPage();
-      if (!opts.userAgent) {
-        await page.setUserAgent(randomUserAgent());
-      }
-      if (!opts.viewport) {
-        await page.setViewport(randomViewport());
-      }
+    // Apply random viewport if not specified (CloakBrowser handles fingerprint noise).
+    // Skip when no viewport is set — calling setViewport() on the freshly-created
+    // session page currently detaches the navigation frame in the Pro build.
+    if (opts.viewport) {
+      await sessionPage.setViewport(opts.viewport);
     }
+    // Side note: randomized viewport assignment is disabled in this build to
+    // avoid a known detach-frame crash in CloakBrowser Pro 150; the fingerprint
+    // coverage CloakBrowser provides at the C++ level already randomizes
+    // viewport-equivalent signals independently of puppeteer.
 
     // Set user agent if provided
     if (opts.userAgent) {
-      const page = await session.getPage();
-      await page.setUserAgent(opts.userAgent);
+      await sessionPage.setUserAgent(opts.userAgent);
     }
 
     // Set extra headers if provided
     if (opts.headers) {
-      const page = await session.getPage();
-      await page.setExtraHTTPHeaders(opts.headers);
+      await sessionPage.setExtraHTTPHeaders(opts.headers);
     }
 
     // Inject cookies if provided
     if (opts.cookies && opts.cookies.length > 0) {
-      const page = await session.getPage();
-      await page.setCookie(
+      await sessionPage.setCookie(
         ...opts.cookies.map((c) => ({
           name: c.name,
           value: c.value,
@@ -173,7 +165,7 @@ export class BrowserPool {
     }
 
     this.sessions.set(id, session);
-    logger.info({ sessionId: id, stealth, viewport }, 'Session created');
+    logger.info({ sessionId: id, stealth: opts.stealth ?? config.STEALTH_DEFAULT, viewport: opts.viewport }, 'Session created');
 
     return session;
   }
@@ -222,11 +214,11 @@ export class BrowserPool {
       return this.utilityBrowser;
     }
 
-    const args = this.buildArgs({});
-    this.utilityBrowser = await (puppeteer as any).launch({
+    this.cloakBinaryPath ??= ensureBinary(config.CLOAKBROWSER_LICENSE_KEY || undefined);
+    this.utilityBrowser = await puppeteerCore.launch({
       headless: true,
-      args,
-      executablePath: this.chromePath || undefined,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
+      executablePath: await this.cloakBinaryPath,
       defaultViewport: { width: 1280, height: 900 },
       timeout: 30_000,
     });

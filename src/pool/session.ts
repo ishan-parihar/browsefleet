@@ -6,6 +6,7 @@ export class BrowserSession {
   readonly id: string;
   readonly browser: Browser;
   readonly cdpEndpoint: string;
+  readonly page: Page;
   readonly options: CreateSessionRequest;
   readonly createdAt: Date;
   readonly expiresAt: Date;
@@ -24,6 +25,7 @@ export class BrowserSession {
     id: string,
     browser: Browser,
     cdpEndpoint: string,
+    page: Page,
     options: CreateSessionRequest,
     onExpire: () => void,
     apiKey?: string,
@@ -31,6 +33,7 @@ export class BrowserSession {
     this.id = id;
     this.browser = browser;
     this.cdpEndpoint = cdpEndpoint;
+    this.page = page;
     this.options = options;
     this.onExpire = onExpire;
     this.apiKey = apiKey;
@@ -89,8 +92,7 @@ export class BrowserSession {
   }
 
   async getPage(): Promise<Page> {
-    const pages = await this.browser.pages();
-    return pages[0] ?? (await this.browser.newPage());
+    return this.page;
   }
 
   async getSnapshot(opts: { includeScreenshot?: boolean; quality?: number } = {}) {

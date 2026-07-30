@@ -36,11 +36,18 @@ Chrome with stealth wants 200 to 500 MB of RAM per active session under load. Si
 
 ## Stealth
 
-| Variable          | Default | Description                                                                                                 |
-| ----------------- | ------- | ----------------------------------------------------------------------------------------------------------- |
-| `STEALTH_DEFAULT` | `full`  | One of `none`, `basic`, or `full`. Controls the default for new sessions. Callers can override per session. |
+| Variable | Default | Description |
+| --- | --- | --- |
+| `STEALTH_DEFAULT` | `full` | One of `none`, `basic`, or `full`. Controls the default for new sessions. Callers can override per session. |
 
-`full` activates `puppeteer-extra-plugin-stealth` plus per-session randomized viewport, user agent, and platform fingerprints. `basic` keeps the plugin but skips the per-session randomization. `none` disables both. See [stealth](./stealth.md) for when each makes sense.
+BrowseFleet uses [CloakBrowser](https://github.com/CloakHQ/CloakBrowser) for stealth. `full` runs the Pro Chromium 150 build (71 C++ patches); `basic` falls back to the free Chromium 146 build (58 patches); `none` disables CloakBrowser entirely and uses a stock Chromium. Stealth happens inside the Chromium binary — there is no JS-injection layer to detect. See [stealth](./stealth.md) for license tiers and detection benchmarks.
+
+### CloakBrowser
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `CLOAKBROWSER_LICENSE_KEY` | unset | Pro key unlocks Chromium 150 + unlimited sessions. Free tier auto-downloads Chromium 146 (1 concurrent session cap). |
+| `CLOAKBROWSER_AUTO_UPDATE` | `true` | Re-downloads the binary on startup when the version changes. |
 
 ## Network
 
