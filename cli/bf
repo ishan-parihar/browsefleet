@@ -215,6 +215,147 @@ cmd_session_release() {
   toon_kv "released" "$(echo "$r" | jq -r '.released')"
 }
 
+cmd_session_control() {
+  case "${1:-}" in
+    --help|-h)
+      cat <<'EOF'
+bf session control -- Switch a session's control mode
+
+Usage: bf session control <id|prefix> <agent|human|paused>
+
+Modes:
+  agent    Autonomous AI-driven session (default at creation)
+  human    Human operator (hijacks Chrome via VNC)
+  paused   No actions until switched back
+
+Example:
+  bf session control abc12345 human
+  bf session control abc12345 agent
+EOF
+      return ;;
+  esac
+  [ $# -lt 2 ] && die "control requires <id|prefix> <agent|human|paused>"
+  local id; id=$(resolve_sid "$1")
+  shift
+  local mode="$1"
+  case "$mode" in
+    agent|human|paused) ;;
+    *) die "invalid mode '$mode'; valid: agent, human, paused" ;;
+  esac
+  local r; r=$(bf_post "/v1/sessions/$id/control" "$(jq -cn --arg m "$mode" '{controlMode:$m}')")
+  check_error "$r"
+  local newmode; newmode=$(echo "$r" | jq -r '.controlMode // empty')
+  if [ -z "$newmode" ]; then
+    die "control response missing controlMode field: $(echo "$r" | head -c 200)"
+  fi
+  toon_kv "session" "$id" "control_mode" "$newmode"
+}
+
+cmd_files() {
+  local sub="${1:-}"; shift 2>/dev/null || true
+  case "$sub" in
+    --help|-h)
+      cat <<'EOF'
+bf session files -- Upload, list, download session files
+
+Usage:
+  bf session files list <id|prefix>
+  bf session files upload <id|prefix> <local-path>
+  bf session files download <id|prefix> <remote-name> <out-path>
+EOF
+      return ;;
+    list)
+      [ $# -lt 1 ] && die "files list requires a session ID"
+      local id; id=$(resolve_sid "$1")
+      local r; r=$(bf_get "/v1/sessions/$id/files")
+      check_error "$r"
+      echo "$r" | jq -r '.files[]? // .[]? // empty' | while IFS= read -r line; do
+        printf '  %s\n' "$line"
+      done
+      ;;
+    upload)
+      [ $# -lt 2 ] && die "files upload requires <id|prefix> <local-path>"
+      local id; id=$(resolve_sid "$1")
+      local src="$2"
+      [ -f "$src" ] || die "local file not found: $src"
+      # Multipart with field name "file" -- browsefleet requires this.
+      local r; r=$(curl -s -X POST -H "x-api-key: ${BROWSEFLEET_TOKEN:-}" -F "file=@${src}" "$BF_URL/v1/sessions/$id/files")
+      check_error "$r"
+      toon_kv "uploaded" "$(echo "$r" | jq -r '.uploaded // empty')" "size" "$(echo "$r" | jq -r '.size // empty')" "session" "$id"
+      ;;
+    download)
+      [ $# -lt 3 ] && die "files download requires <id|prefix> <remote-name> <out-path>"
+      local id; id=$(resolve_sid "$1")
+      local name="$2"
+      local out="$3"
+      "${CURL[@]}" "$BF_URL/v1/sessions/$id/files/$name" --output "$out" 2>/dev/null
+      if [ -s "$out" ]; then
+        local sz; sz=$(stat -c%s "$out" 2>/dev/null || stat -f%z "$out" 2>/dev/null)
+        toon_kv "downloaded" "$out" "remote" "$name" "bytes" "$sz"
+      else
+        rm -f "$out"
+        die "download failed -- empty file"
+      fi
+      ;;
+    *) die "unknown files subcommand '$sub'; valid: list, upload, download" ;;
+  esac
+}
+
+cmd_captcha() {
+  local sub="${1:-}"; shift 2>/dev/null || true
+  case "$sub" in
+    --help|-h)
+      cat <<'EOF'
+bf session captcha -- Solve a CAPTCHA on the current page
+
+Usage: bf session captcha solve <id|prefix>
+EOF
+      return ;;
+    solve)
+      [ $# -lt 1 ] && die "captcha solve requires a session ID"
+      local id; id=$(resolve_sid "$1")
+      local r; r=$(bf_post "/v1/sessions/$id/captcha/solve" "{}")
+      check_error "$r"
+      local ok type duration err
+      ok=$(echo "$r" | jq -r '.success // empty')
+      type=$(echo "$r" | jq -r '.type // empty')
+      duration=$(echo "$r" | jq -r '.duration // empty')
+      err=$(echo "$r" | jq -r '.error // empty')
+      if [ -n "$err" ]; then
+        toon_kv "session" "$id" "success" "$ok" "type" "$type" "duration" "$duration" "error" "$err"
+      else
+        toon_kv "session" "$id" "success" "$ok" "type" "$type" "duration" "$duration"
+      fi
+      [ "$ok" = "true" ] || die "captcha solve failed: $err"
+      ;;
+    *) die "unknown captcha subcommand '$sub'; valid: solve" ;;
+  esac
+}
+
+cmd_agent() {
+  case "${1:-}" in
+    --help|-h)
+      cat <<'EOF'
+bf session agent -- Run an autonomous AI agent task
+
+Usage: bf session agent <id|prefix> <task description>
+
+The agent runs synchronously and returns steps taken. May take several seconds
+to minutes depending on task complexity.
+EOF
+      return ;;
+  esac
+  [ $# -lt 2 ] && die "agent requires <id|prefix> <task>"
+  local id; id=$(resolve_sid "$1")
+  shift
+  local task="$*"
+  local r; r=$(bf_post "/v1/agent" "$(jq -cn --arg id "$id" --arg task "$task" '{session:$id, task:$task}')")
+  check_error "$r"
+  echo "$r" | jq -r '.steps[]? | "  - " + .action + ": " + (.result // "")' 2>/dev/null || echo "$r" | jq .
+}
+
+
+
 cmd_action() {
   # Allow `bf action --help` with no session id
   if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
@@ -243,6 +384,7 @@ EOF
   [ $# -lt 1 ] && die "action requires a session ID"
   local sid; sid=$(resolve_sid "$1")
   shift
+  local screenshot_path=""
   local actions="" json=""
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -253,7 +395,7 @@ EOF
       --key) actions=$(jq -cn --arg key "$2" '[{type:"press_key",key:$key}]'); shift 2 ;;
       --scroll) actions=$(jq -cn --argjson dy "$2" '[{type:"scroll",deltaY:$dy}]'); shift 2 ;;
       --wait) actions=$(jq -cn --argjson duration "$2" '[{type:"wait",duration:$duration}]'); shift 2 ;;
-      --screenshot) actions='[{"type":"screenshot"}]'; shift ;;
+      --screenshot) actions='[{"type":"screenshot"}]'; screenshot_path="${2:-}"; [ $# -ge 2 ] && shift 2 || shift ;;
       --help|-h) cmd_action --help; return ;;
       *) die "unknown flag $1 for action; valid flags: --navigate, --click, --type, --key, --scroll, --wait, --screenshot, --json" ;;
     esac
@@ -264,10 +406,30 @@ EOF
   local r; r=$(bf_post "/v1/sessions/$sid/actions" "$(jq -cn --argjson actions "$actions" '{actions:$actions}')")
   check_error "$r"
   local count; count=$(echo "$r" | jq '.results | length')
-  printf 'results[%s]{type,success,error}:\n' "$count"
-  echo "$r" | jq -r '.results[] | [.type, (.success | tostring), (.error // "")] | @tsv' | while IFS=$'\t' read -r type success error; do
-    printf '  %s,%s,%s\n' "$type" "$success" "${error//,/;}"
+  printf 'results: %s\n' "$count"
+  local failed; failed=0
+  local i=0
+  while [ "$i" -lt "$count" ]; do
+    local result; result=$(echo "$r" | jq -c ".results[$i]")
+    local type success error
+    type=$(echo "$result" | jq -r '.type')
+    success=$(echo "$result" | jq -r '.success')
+    error=$(echo "$result" | jq -r '.error // ""')
+    printf '  - type: %s\n    success: %s\n    error: "%s"\n' "$type" "$success" "$error"
+    if [ "$type" = "screenshot" ] && [ "$success" = "true" ] && [ -n "$screenshot_path" ]; then
+      local img
+      img=$(echo "$result" | jq -r '.screenshot // empty')
+      if [ -n "$img" ] && [ "$img" != "null" ]; then
+        if echo "$img" | base64 -d > "$screenshot_path" 2>/dev/null && [ -s "$screenshot_path" ]; then
+          local sz; sz=$(stat -c%s "$screenshot_path" 2>/dev/null || stat -f%z "$screenshot_path" 2>/dev/null)
+          printf '    saved: %s (%s bytes)\n' "$screenshot_path" "$sz"
+        fi
+      fi
+    fi
+    [ "$success" = "false" ] && failed=$((failed + 1))
+    i=$((i + 1))
   done
+  [ "$failed" -eq 0 ] || die "$failed action(s) failed"
 }
 
 cmd_axi() {
@@ -433,7 +595,7 @@ EOF
     --argjson width "$width" \
     --argjson height "$height" \
     --arg session "$session" \
-    '{url:$url, fullPage:$fullpage, width:$width, height:$height} | if $session != "" then . + {session:$session} else . end')
+    '{url:$url, fullPage:$fullpage, viewport:{width:$width, height:$height}} | if $session != "" then . + {session:$session} else . end')
   "${CURL[@]}" -X POST -H 'Content-Type: application/json' -d "$body" "$BF_URL/v1/screenshot" --output "$outfile" 2>/dev/null
 
   if file "$outfile" | grep -q "PNG image"; then
@@ -678,12 +840,33 @@ case "$cmd" in
     [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ] && { printf 'usage: bf sessions\nlist active browser sessions on the server\n'; exit 0; }
     cmd_sessions "$@" ;;
   session)
-    sub="${1:-help}"; shift 2>/dev/null || true
+    sub="${1:-}"; shift 2>/dev/null || true
     case "$sub" in
+      --help|-h|"") cat <<'USAGE_EOF'
+bf session -- Manage browser sessions
+
+Usage: bf session <subcommand> [args]
+
+Subcommands:
+  create [flags]       Create a new browser session
+  view <id|prefix>     Inspect a session
+  release <id|prefix>  Release a session
+  control <id> <mode>  Switch control mode (agent|human|paused)
+  files <subcommand>   Upload, list, or download session files
+  captcha solve <id>   Solve a CAPTCHA on the current page
+  agent <id> <task>    Run an autonomous AI agent task
+
+Run `bf session <subcommand> --help` for subcommand details.
+USAGE_EOF
+        exit 0 ;;
       create)  cmd_session_create "$@" ;;
       view)    cmd_session_view "$@" ;;
       release) cmd_session_release "$@" ;;
-      *) die "unknown session subcommand: $sub\nhelp: valid subcommands: create, view, release" ;;
+      control) cmd_session_control "$@" ;;
+      files)   cmd_files "$@" ;;
+      captcha) cmd_captcha "$@" ;;
+      agent)   cmd_agent "$@" ;;
+      *) die "$(printf 'unknown session subcommand: %s\nhelp: valid: create, view, release, control, files, captcha, agent' "$sub")" ;;
     esac ;;
   scrape)        cmd_scrape "$@" ;;
   action)        cmd_action "$@" ;;
