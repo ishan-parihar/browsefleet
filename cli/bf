@@ -541,6 +541,10 @@ EOF
         json="$2"; shift 2 ;;
       --navigate)
         [ -n "$actions" ] && die "only one action flag allowed; use --json for batches"
+        case "$2" in
+          http://*|https://*|about:*|data:*) ;;
+          *) die "--navigate url must start with http://, https://, about:, or data:, got '$2'" ;;
+        esac
         actions=$(jq -cn --arg url "$2" '[{type:"navigate",url:$url}]'); shift 2 ;;
       --click)
         [ -n "$actions" ] && die "only one action flag allowed; use --json for batches"
