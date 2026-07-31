@@ -428,18 +428,30 @@ EOF
       local name="$2"
       local out="$3"
       local rc=0
-      "${CURL[@]}" "$BF_URL/v1/sessions/$id/files/$name" --output "$out" 2>/dev/null || rc=$?
+      curl -sS --fail-with-body -H "x-api-key: ${BF_TOKEN:-}" \
+        "$BF_URL/v1/sessions/$id/files/$name" --output "$out" 2>/dev/null || rc=$?
       if [ "$rc" -eq 7 ] || [ "$rc" -eq 6 ]; then
         rm -f "$out"
         die "cannot reach $BF_URL"
       fi
-      if [ -s "$out" ]; then
-        local sz; sz=$(stat -c%s "$out" 2>/dev/null || stat -f%z "$out" 2>/dev/null)
-        toon_kv "downloaded" "$out" "remote" "$name" "bytes" "$sz"
-      else
+      if [ "$rc" -ne 0 ]; then
+        # curl --fail-with-body wrote the server's error body to $out.
+        # Detect a JSON {"error":...} shape and surface it; otherwise generic message.
+        local err
+        err=$(jq -r '.error // empty' < "$out" 2>/dev/null)
         rm -f "$out"
-        die "download failed — server returned no data (rc=$rc)"
+        if [ -n "$err" ]; then
+          die "download failed: $err"
+        else
+          die "download failed (curl rc=$rc)"
+        fi
       fi
+      if [ ! -s "$out" ]; then
+        rm -f "$out"
+        die "download failed — server returned no data"
+      fi
+      local sz; sz=$(stat -c%s "$out" 2>/dev/null || stat -f%z "$out" 2>/dev/null)
+      toon_kv "downloaded" "$out" "remote" "$name" "bytes" "$sz"
       ;;
     *) die "unknown files subcommand '$sub'; valid: list, upload, download" ;;
   esac
