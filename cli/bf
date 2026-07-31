@@ -95,7 +95,7 @@ bf_get() {
   local out rc=0
   out=$(bf_curl "${CURL[@]}" "$BF_URL$1") || rc=$?
   if [ "$rc" -gt 0 ]; then
-    bf_curl_die "$rc"
+    bf_curl_msg "$rc"
   fi
   printf '%s' "$out"
   return 0
@@ -106,7 +106,7 @@ bf_post() {
   local out rc=0
   out=$(bf_curl "${CURL[@]}" -X POST -H 'Content-Type: application/json' -d "$body" "$BF_URL$1") || rc=$?
   if [ "$rc" -gt 0 ]; then
-    bf_curl_die "$rc"
+    bf_curl_msg "$rc"
   fi
   printf '%s' "$out"
   return 0
@@ -115,7 +115,7 @@ bf_del() {
   local out rc=0
   out=$(bf_curl "${CURL[@]}" -X DELETE "$BF_URL$1") || rc=$?
   if [ "$rc" -gt 0 ]; then
-    bf_curl_die "$rc"
+    bf_curl_msg "$rc"
   fi
   printf '%s' "$out"
   return 0
@@ -125,6 +125,7 @@ bf_del() {
 # Die on error; otherwise return silently so callers can assign r=$(...) cleanly.
 check_error() {
   local r="$1"
+  check_conn
   local err; err=$(echo "$r" | jq -r '.error // empty' 2>/dev/null)
   [ -n "$err" ] && die "server error: $err"
   return 0
@@ -145,14 +146,22 @@ bf_curl() {
   return "$rc"
 }
 
-# Convert curl exit code to a clear error message and die.
-bf_curl_die() {
+# Global error message buffer — when a subshell sees a connection error,
+# it stores the message here and sets the rc. The outer script reads
+# BF_CONN_ERROR at every r=$(bf_X ...) capture point and dies if set.
+# This is the only way to propagate die() across a $() boundary: bash
+# does not propagate exit codes from subshell-die, so we use a side-channel.
+BF_CONN_ERROR=""
+
+# Convert curl exit code to a clear error message and store it in BF_CONN_ERROR.
+# Does NOT call die() — caller (bf_get / bf_post / bf_del) decides when to die.
+bf_curl_msg() {
   case "$1" in
-    6)  die "cannot resolve host for $BF_URL" ;;
-    7)  die "cannot reach $BF_URL (connection refused)" ;;
-    22) die "HTTP request to $BF_URL was rejected (4xx)" ;;
-    28) die "request to $BF_URL timed out" ;;
-    *)  die "curl failed against $BF_URL (rc=$1)" ;;
+    6)  BF_CONN_ERROR="cannot resolve host for $BF_URL" ;;
+    7)  BF_CONN_ERROR="cannot reach $BF_URL (connection refused)" ;;
+    22) BF_CONN_ERROR="HTTP request to $BF_URL was rejected (4xx)" ;;
+    28) BF_CONN_ERROR="request to $BF_URL timed out" ;;
+    *)  BF_CONN_ERROR="curl failed against $BF_URL (rc=$1)" ;;
   esac
 }
 
