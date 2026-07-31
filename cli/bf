@@ -28,6 +28,36 @@ toon_kv() {
   done
 }
 
+# ── Validation helpers ──────────────────────────────────────────────
+# Centralized flag validation so each command stays terse.
+
+is_bool() {
+  # is_bool <value>  →  returns 0 if value is true|false (case-insensitive)
+  case "${1,,}" in
+    true|false) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+is_positive_int() {
+  # is_positive_int <value>  →  returns 0 if value is a positive integer
+  [[ "$1" =~ ^[1-9][0-9]*$ ]]
+}
+
+is_int() {
+  # is_int <value>  →  returns 0 if value is an integer (may be zero or negative)
+  [[ "$1" =~ ^-?[0-9]+$ ]]
+}
+
+is_enum() {
+  # is_enum <value> <allowed1> [allowed2 ...]
+  local v="$1"; shift
+  for allowed in "$@"; do
+    [[ "$v" == "$allowed" ]] && return 0
+  done
+  return 1
+}
+
 toon_arr() {
   # toon_arr count val1 val2 ...
   local n=$1; shift
@@ -58,13 +88,29 @@ die() { printf 'error: %s\n' "$1" >&2; exit 1; }
 usage_hint() { printf 'help: Run `bf %s --help` for usage\n' "$1" >&2; }
 
 # ── API helpers ─────────────────────────────────────────────────────
-bf_get()  { "${CURL[@]}" "$BF_URL$1" 2>/dev/null || true; }
+# All helpers swallow curl's exit code (so `r=$(bf_get ...)` never trips set -e)
+# but route through bf_curl so connection failures die with a clear message
+# rather than silently returning an empty string.
+bf_get() {
+  local out rc=0
+  out=$(bf_curl "${CURL[@]}" "$BF_URL$1") || rc=$?
+  printf '%s' "$out"
+  return 0
+}
 bf_post() {
   local body="${2:-}"
   [ -z "$body" ] && body="{}"
-  "${CURL[@]}" -X POST -H 'Content-Type: application/json' -d "$body" "$BF_URL$1" 2>/dev/null || true
+  local out rc=0
+  out=$(bf_curl "${CURL[@]}" -X POST -H 'Content-Type: application/json' -d "$body" "$BF_URL$1") || rc=$?
+  printf '%s' "$out"
+  return 0
 }
-bf_del()  { "${CURL[@]}" -X DELETE "$BF_URL$1" 2>/dev/null || true; }
+bf_del() {
+  local out rc=0
+  out=$(bf_curl "${CURL[@]}" -X DELETE "$BF_URL$1") || rc=$?
+  printf '%s' "$out"
+  return 0
+}
 
 # Surface {"error": "..."} payloads from any API response.
 # Die on error; otherwise return silently so callers can assign r=$(...) cleanly.
@@ -75,9 +121,33 @@ check_error() {
   return 0
 }
 
+# Run a curl invocation and die loudly if the host is unreachable.
+# Distinguishes connection failures (curl exit 7) from HTTP error responses
+# (curl exit 22) — the former almost always indicates a bad --url or
+# downed BrowseFleet instance and should fail-fast.
+bf_curl() {
+  local args=("$@")
+  local rc=0
+  local out
+  out=$("${args[@]}" 2>/dev/null) || rc=$?
+  if [ "$rc" -eq 7 ]; then
+    die "cannot reach $BF_URL (connection refused or DNS failure)"
+  elif [ "$rc" -eq 6 ]; then
+    die "cannot resolve host for $BF_URL"
+  elif [ "$rc" -eq 28 ]; then
+    die "request to $BF_URL timed out"
+  fi
+  printf '%s' "$out"
+}
+
 # ── Commands ────────────────────────────────────────────────────────
 
 cmd_health() {
+  case "${1:-}" in
+    --help|-h)
+      printf 'usage: bf health\ncheck BrowseFleet status\nreturns: status, version, uptime_sec\n'
+      return ;;
+  esac
   local r; r=$(bf_get /health)
   check_error "$r"
   local status=$(echo "$r" | jq -r '.status')
@@ -138,11 +208,11 @@ Flags:
   --proxy, -p <url>          Outbound proxy for this session
   --profile <id>             Reuse a saved Chrome user-data directory
   --headless <bool>          true (default) or false (operator mode)
-  --timeout, -t <ms>         Session lifetime in milliseconds
+  --timeout, -t <ms>         Session lifetime in milliseconds (positive integer)
   --stealth, -s <mode>       none | basic | full (default per STEALTH_DEFAULT)
-  --control-mode <mode>      agent (default) | operator
+  --control-mode <mode>      agent (default) | human | paused | operator
   --sensitive-mode <bool>    true | false (default)
-  --viewport WxH             Viewport size (e.g. 1920x1080)
+  --viewport WxH             Viewport size, e.g. 1920x1080
 
 Example:
   bf session create --fingerprint jp-tokyo-001 --headless true
@@ -151,6 +221,26 @@ EOF
       *) die "unknown flag $1 for session create" ;;
     esac
   done
+
+  # Validate flags AFTER parsing so unknown-flag errors come first.
+  if [ -n "$headless" ]; then
+    is_bool "$headless" || die "--headless must be true or false, got '$headless'"
+  fi
+  if [ -n "$timeout" ]; then
+    is_positive_int "$timeout" || die "--timeout must be a positive integer (ms), got '$timeout'"
+  fi
+  if [ -n "$stealth" ]; then
+    is_enum "$stealth" none basic full || die "--stealth must be one of none|basic|full, got '$stealth'"
+  fi
+  if [ -n "$cm" ]; then
+    is_enum "$cm" agent human paused operator || die "--control-mode must be one of agent|human|paused|operator, got '$cm'"
+  fi
+  if [ -n "$sm" ]; then
+    is_bool "$sm" || die "--sensitive-mode must be true or false, got '$sm'"
+  fi
+  if [ -n "$vp" ]; then
+    [[ "$vp" =~ ^[0-9]+x[0-9]+$ ]] || die "--viewport must match WxH (e.g. 1920x1080), got '$vp'"
+  fi
 
   local body="{"
   [ -n "$fp" ] && body+="\"fingerprint\":\"$fp\","
@@ -288,13 +378,18 @@ EOF
       local id; id=$(resolve_sid "$1")
       local name="$2"
       local out="$3"
-      "${CURL[@]}" "$BF_URL/v1/sessions/$id/files/$name" --output "$out" 2>/dev/null
+      local rc=0
+      "${CURL[@]}" "$BF_URL/v1/sessions/$id/files/$name" --output "$out" 2>/dev/null || rc=$?
+      if [ "$rc" -eq 7 ] || [ "$rc" -eq 6 ]; then
+        rm -f "$out"
+        die "cannot reach $BF_URL"
+      fi
       if [ -s "$out" ]; then
         local sz; sz=$(stat -c%s "$out" 2>/dev/null || stat -f%z "$out" 2>/dev/null)
         toon_kv "downloaded" "$out" "remote" "$name" "bytes" "$sz"
       else
         rm -f "$out"
-        die "download failed -- empty file"
+        die "download failed — server returned no data (rc=$rc)"
       fi
       ;;
     *) die "unknown files subcommand '$sub'; valid: list, upload, download" ;;
@@ -371,13 +466,17 @@ Flags:
   --key <key>            Press a key
   --scroll <pixels>      Scroll vertically
   --wait <milliseconds>  Wait
-  --screenshot            Capture a screenshot
+  --screenshot <path>    Capture a screenshot (path required to save)
   --json '<array>'       Send a raw action array
+
+Only ONE action flag (other than --json) is allowed per call. Use
+--json to send a batch of actions.
 
 Examples:
   bf action <id> --navigate https://example.com
   bf action <id> --click 420 300
-  bf action <id> --json '[{"type":"wait","duration":1000}]'
+  bf action <id> --screenshot /tmp/shot.png
+  bf action <id> --json '[{"type":"wait","duration":1000},{"type":"screenshot"}]'
 EOF
     return
   fi
@@ -388,14 +487,38 @@ EOF
   local actions="" json=""
   while [ $# -gt 0 ]; do
     case "$1" in
-      --json) json="$2"; shift 2 ;;
-      --navigate) actions=$(jq -cn --arg url "$2" '[{type:"navigate",url:$url}]'); shift 2 ;;
-      --click) actions=$(jq -cn --argjson x "$2" --argjson y "$3" '[{type:"click",x:$x,y:$y}]'); shift 3 ;;
-      --type) actions=$(jq -cn --arg text "$2" '[{type:"type",text:$text}]'); shift 2 ;;
-      --key) actions=$(jq -cn --arg key "$2" '[{type:"press_key",key:$key}]'); shift 2 ;;
-      --scroll) actions=$(jq -cn --argjson dy "$2" '[{type:"scroll",deltaY:$dy}]'); shift 2 ;;
-      --wait) actions=$(jq -cn --argjson duration "$2" '[{type:"wait",duration:$duration}]'); shift 2 ;;
-      --screenshot) actions='[{"type":"screenshot"}]'; screenshot_path="${2:-}"; [ $# -ge 2 ] && shift 2 || shift ;;
+      --json)
+        [ -n "$actions" ] && die "only one action flag allowed; --json cannot combine with others"
+        json="$2"; shift 2 ;;
+      --navigate)
+        [ -n "$actions" ] && die "only one action flag allowed; use --json for batches"
+        actions=$(jq -cn --arg url "$2" '[{type:"navigate",url:$url}]'); shift 2 ;;
+      --click)
+        [ -n "$actions" ] && die "only one action flag allowed; use --json for batches"
+        [ $# -lt 3 ] && die "--click requires <x> <y>"
+        is_int "$2" || die "--click x must be an integer, got '$2'"
+        is_int "$3" || die "--click y must be an integer, got '$3'"
+        actions=$(jq -cn --argjson x "$2" --argjson y "$3" '[{type:"click",x:$x,y:$y}]'); shift 3 ;;
+      --type)
+        [ -n "$actions" ] && die "only one action flag allowed; use --json for batches"
+        [ $# -lt 2 ] && die "--type requires <text>"
+        actions=$(jq -cn --arg text "$2" '[{type:"type",text:$text}]'); shift 2 ;;
+      --key)
+        [ -n "$actions" ] && die "only one action flag allowed; use --json for batches"
+        actions=$(jq -cn --arg key "$2" '[{type:"press_key",key:$key}]'); shift 2 ;;
+      --scroll)
+        [ -n "$actions" ] && die "only one action flag allowed; use --json for batches"
+        is_int "$2" || die "--scroll must be an integer (pixel delta), got '$2'"
+        actions=$(jq -cn --argjson dy "$2" '[{type:"scroll",deltaY:$dy}]'); shift 2 ;;
+      --wait)
+        [ -n "$actions" ] && die "only one action flag allowed; use --json for batches"
+        is_int "$2" || die "--wait must be an integer (milliseconds), got '$2'"
+        [ "$2" -lt 0 ] && die "--wait cannot be negative"
+        actions=$(jq -cn --argjson duration "$2" '[{type:"wait",duration:$duration}]'); shift 2 ;;
+      --screenshot)
+        [ -n "$actions" ] && die "only one action flag allowed; use --json for batches"
+        [ $# -lt 2 ] && die "--screenshot requires <path>"
+        actions='[{"type":"screenshot"}]'; screenshot_path="$2"; shift 2 ;;
       --help|-h) cmd_action --help; return ;;
       *) die "unknown flag $1 for action; valid flags: --navigate, --click, --type, --key, --scroll, --wait, --screenshot, --json" ;;
     esac
@@ -510,7 +633,18 @@ EOF
     esac
   done
   [ -z "$url" ] && die "scrape requires a URL"
-  [ -n "$session" ] && session=$(resolve_sid "$session")
+  if [ -n "$session" ]; then
+    case "$session" in
+      --help|-h|"") die "scrape --session requires an ID" ;;
+    esac
+    session=$(resolve_sid "$session")
+  fi
+  if [ -n "$format" ]; then
+    is_enum "$format" markdown html text links || die "--format must be markdown|html|text|links, got '$format'"
+  fi
+  if [ -n "$waituntil" ]; then
+    is_enum "$waituntil" load domcontentloaded networkidle networkidle0 networkidle2 || die "--waituntil must be load|domcontentloaded|networkidle[0|2], got '$waituntil'"
+  fi
 
   local body; body=$(jq -cn \
     --arg url "$url" \
@@ -586,7 +720,11 @@ EOF
     esac
   done
   [ -z "$url" ] && die "screenshot requires a URL"
-  [ -n "$session" ] && session=$(resolve_sid "$session")
+  if [ -n "$session" ]; then
+    session=$(resolve_sid "$session")
+  fi
+  is_positive_int "$width" || die "--width must be a positive integer, got '$width'"
+  is_positive_int "$height" || die "--height must be a positive integer, got '$height'"
   [ -z "$outfile" ] && outfile="/tmp/bf-screenshot-$(date +%s).png"
 
   local body; body=$(jq -cn \
@@ -665,11 +803,17 @@ EOF
   [ $# -lt 3 ] && die "click requires a session ID, x, and y"
   local sid; sid=$(resolve_sid "$1")
   local x="$2" y="$3"
+  is_int "$x" || die "click x must be an integer, got '$x'"
+  is_int "$y" || die "click y must be an integer, got '$y'"
   local body; body=$(jq -cn --argjson x "$x" --argjson y "$y" '{actions:[{type:"click",x:$x,y:$y}]}')
   local r; r=$(bf_post "/v1/sessions/$sid/actions" "$body")
   check_error "$r"
   local ok; ok=$(echo "$r" | jq -r '.results[0].success')
   toon_kv "session" "$sid" "clicked" "[$x,$y]" "success" "$ok"
+  if [ "$ok" != "true" ]; then
+    local err; err=$(echo "$r" | jq -r '.results[0].error // "unknown"')
+    die "click failed: $err"
+  fi
 }
 
 cmd_fill() {
@@ -693,6 +837,10 @@ EOF
   check_error "$r"
   local ok; ok=$(echo "$r" | jq -r '.results[0].success')
   toon_kv "session" "$sid" "typed_chars" "${#val}" "success" "$ok"
+  if [ "$ok" != "true" ]; then
+    local err; err=$(echo "$r" | jq -r '.results[0].error // "unknown"')
+    die "fill failed: $err"
+  fi
 }
 
 cmd_navigate() {
@@ -704,11 +852,19 @@ cmd_navigate() {
   [ $# -lt 2 ] && die "navigate requires a session ID and URL"
   local sid; sid=$(resolve_sid "$1")
   local url="$2"
+  case "$url" in
+    http://*|https://*|about:*|data:*) ;;
+    *) die "navigate url must start with http://, https://, about:, or data:, got '$url'" ;;
+  esac
   local body; body=$(jq -cn --arg url "$url" '{actions:[{type:"navigate",url:$url}]}')
   local r; r=$(bf_post "/v1/sessions/$sid/actions" "$body")
   check_error "$r"
   local ok; ok=$(echo "$r" | jq -r '.results[0].success')
   toon_kv "session" "$sid" "url" "$url" "success" "$ok"
+  if [ "$ok" != "true" ]; then
+    local err; err=$(echo "$r" | jq -r '.results[0].error // "unknown"')
+    die "navigate failed: $err"
+  fi
 }
 
 cmd_console() {
@@ -793,20 +949,25 @@ commands[15]:
   session create [flags]        Create a new browser session
   session view <id|prefix>      Inspect a session (accepts unique 8+ char prefix)
   session release <id|prefix>   Release a session
+  session control <id> <mode>   Switch control mode (agent|human|paused)
+  session files <sub> <args>    Upload, list, or download session files
+  session captcha solve <id>    Solve a CAPTCHA on the current page
+  session agent <id> <task>     Run an autonomous AI agent task
   action <id|prefix> [flags]    Run session actions over REST
   axi <id|prefix> <command>     Run chrome-devtools-axi over session CDP
   scrape [flags] <url>          Extract content from a URL
   screenshot [flags] <url>      Capture a screenshot
   pdf [flags] <url>             Generate a PDF
-  click <sid|prefix> <selector> Click an element
-  fill <sid|prefix> <sel> <val> Fill a form field
+  click <sid|prefix> <x> <y>    Click at coordinates
+  fill <sid|prefix> <text>      Type text into focused element
   navigate <sid|prefix> <url>   Navigate a session
-  console <sid|prefix>          Get browser console logs
-  network <sid|prefix>          Get network requests
+  console <sid|prefix>          Get browser console logs (returns 0; server emits no events)
+  network <sid|prefix>          Get network requests (returns 0; server emits no events)
 
 flags[3]:
   --help, -h          Show help for any command
   --url <url>         Override BrowseFleet URL (env: BROWSEFLEET_URL)
+  --token <token>     Override auth token (env: BROWSEFLEET_TOKEN)
   --version, -v       Print version
 
 environment:
@@ -823,21 +984,31 @@ EOF
 
 # ── Router ──────────────────────────────────────────────────────────
 
-[ $# -eq 0 ] && { cmd_health; return; } 2>/dev/null || true
+[ $# -eq 0 ] && { cmd_help; exit 0; }
 
 # Global flags
-case "${1:-}" in
-  -v|--version) echo "bf 0.1.0"; exit 0 ;;
-  -h|--help) cmd_help; exit 0 ;;
-  --url) BF_URL="$2"; shift 2 ;;
-esac
+while [ $# -gt 0 ]; do
+  case "${1:-}" in
+    -v|--version) echo "bf 0.1.0"; exit 0 ;;
+    -h|--help) cmd_help; exit 0 ;;
+    --url) BF_URL="$2"; BF_CDP_URL="${BROWSEFLEET_CDP_URL:-$BF_URL}"; CURL=(curl -sS --fail-with-body --max-time 120); [ -n "$BF_TOKEN" ] && CURL+=(-H "x-api-key: $BF_TOKEN"); shift 2 ;;
+    --token) BF_TOKEN="$2"; CURL=(curl -sS --fail-with-body --max-time 120); [ -n "$BF_TOKEN" ] && CURL+=(-H "x-api-key: $BF_TOKEN"); shift 2 ;;
+    *) break ;;
+  esac
+done
 
 cmd="${1:-help}"; shift
 
 case "$cmd" in
-  health)        cmd_health "$@" ;;
+  health)
+    case "${1:-}" in
+      --help|-h) cmd_health --help; exit 0 ;;
+    esac
+    cmd_health "$@" ;;
   sessions)
-    [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ] && { printf 'usage: bf sessions\nlist active browser sessions on the server\n'; exit 0; }
+    case "${1:-}" in
+      --help|-h) printf 'usage: bf sessions\nlist active browser sessions on the server\n'; exit 0 ;;
+    esac
     cmd_sessions "$@" ;;
   session)
     sub="${1:-}"; shift 2>/dev/null || true
