@@ -94,6 +94,9 @@ usage_hint() { printf 'help: Run `bf %s --help` for usage\n' "$1" >&2; }
 bf_get() {
   local out rc=0
   out=$(bf_curl "${CURL[@]}" "$BF_URL$1") || rc=$?
+  if [ "$rc" -gt 0 ]; then
+    bf_curl_die "$rc"
+  fi
   printf '%s' "$out"
   return 0
 }
@@ -102,12 +105,18 @@ bf_post() {
   [ -z "$body" ] && body="{}"
   local out rc=0
   out=$(bf_curl "${CURL[@]}" -X POST -H 'Content-Type: application/json' -d "$body" "$BF_URL$1") || rc=$?
+  if [ "$rc" -gt 0 ]; then
+    bf_curl_die "$rc"
+  fi
   printf '%s' "$out"
   return 0
 }
 bf_del() {
   local out rc=0
   out=$(bf_curl "${CURL[@]}" -X DELETE "$BF_URL$1") || rc=$?
+  if [ "$rc" -gt 0 ]; then
+    bf_curl_die "$rc"
+  fi
   printf '%s' "$out"
   return 0
 }
@@ -121,23 +130,30 @@ check_error() {
   return 0
 }
 
-# Run a curl invocation and die loudly if the host is unreachable.
-# Distinguishes connection failures (curl exit 7) from HTTP error responses
-# (curl exit 22) — the former almost always indicates a bad --url or
-# downed BrowseFleet instance and should fail-fast.
+# Run a curl invocation and return its exit code. Does NOT die — callers
+# (bf_get / bf_post / bf_del) inspect the rc and decide what to do.
+# Why: `die` inside a $(...) subshell only exits the subshell, not the parent.
+# So bf_curl dies silently when used through `r=$(bf_curl ...)`, and the
+# parent sees an empty $r and continues. The fix is to bubble the rc up
+# and let the caller die in the parent scope where die actually exits.
 bf_curl() {
   local args=("$@")
   local rc=0
   local out
   out=$("${args[@]}" 2>/dev/null) || rc=$?
-  if [ "$rc" -eq 7 ]; then
-    die "cannot reach $BF_URL (connection refused or DNS failure)"
-  elif [ "$rc" -eq 6 ]; then
-    die "cannot resolve host for $BF_URL"
-  elif [ "$rc" -eq 28 ]; then
-    die "request to $BF_URL timed out"
-  fi
   printf '%s' "$out"
+  return "$rc"
+}
+
+# Convert curl exit code to a clear error message and die.
+bf_curl_die() {
+  case "$1" in
+    6)  die "cannot resolve host for $BF_URL" ;;
+    7)  die "cannot reach $BF_URL (connection refused)" ;;
+    22) die "HTTP request to $BF_URL was rejected (4xx)" ;;
+    28) die "request to $BF_URL timed out" ;;
+    *)  die "curl failed against $BF_URL (rc=$1)" ;;
+  esac
 }
 
 # ── Commands ────────────────────────────────────────────────────────
@@ -943,7 +959,7 @@ url: ${BF_URL}
 
 usage: bf <command> [args] [flags]
 
-commands[15]:
+commands[19]:
   health                        Check BrowseFleet status
   sessions                      List active browser sessions
   session create [flags]        Create a new browser session
