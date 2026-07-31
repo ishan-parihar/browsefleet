@@ -88,14 +88,25 @@ die() { printf 'error: %s\n' "$1" >&2; exit 1; }
 usage_hint() { printf 'help: Run `bf %s --help` for usage\n' "$1" >&2; }
 
 # ── API helpers ─────────────────────────────────────────────────────
-# All helpers swallow curl's exit code (so `r=$(bf_get ...)` never trips set -e)
-# but route through bf_curl so connection failures die with a clear message
-# rather than silently returning an empty string.
+# Connection errors are propagated via a "BF_CONN:" sentinel prefix on the
+# response body, because bash cannot propagate die() (or any exit code) from
+# inside a $(...) subshell back to the parent. The parent detects the
+# sentinel in check_error and dies in the parent scope.
+#
+# Pattern: every response that the parent might assign to r via $(...) goes
+# through bf_curl. On curl-level failure (rc 6/7/22/28/...), bf_get/etc
+# substitute the body with "BF_CONN:<message>" so the body is not empty.
+# check_error inspects the prefix first, dies if set, then falls through to
+# JSON .error detection for HTTP-level errors.
+
 bf_get() {
   local out rc=0
   out=$(bf_curl "${CURL[@]}" "$BF_URL$1") || rc=$?
   if [ "$rc" -gt 0 ]; then
     bf_curl_msg "$rc"
+    printf '%s' "$BF_CONN_ERROR"
+    BF_CONN_ERROR=""
+    return 0
   fi
   printf '%s' "$out"
   return 0
@@ -107,6 +118,9 @@ bf_post() {
   out=$(bf_curl "${CURL[@]}" -X POST -H 'Content-Type: application/json' -d "$body" "$BF_URL$1") || rc=$?
   if [ "$rc" -gt 0 ]; then
     bf_curl_msg "$rc"
+    printf '%s' "$BF_CONN_ERROR"
+    BF_CONN_ERROR=""
+    return 0
   fi
   printf '%s' "$out"
   return 0
@@ -116,16 +130,34 @@ bf_del() {
   out=$(bf_curl "${CURL[@]}" -X DELETE "$BF_URL$1") || rc=$?
   if [ "$rc" -gt 0 ]; then
     bf_curl_msg "$rc"
+    printf '%s' "$BF_CONN_ERROR"
+    BF_CONN_ERROR=""
+    return 0
   fi
   printf '%s' "$out"
   return 0
 }
 
-# Surface {"error": "..."} payloads from any API response.
-# Die on error; otherwise return silently so callers can assign r=$(...) cleanly.
+# Convert curl exit code to a clear error message and store it in BF_CONN_ERROR.
+bf_curl_msg() {
+  case "$1" in
+    6)  BF_CONN_ERROR="BF_CONN:cannot resolve host for $BF_URL" ;;
+    7)  BF_CONN_ERROR="BF_CONN:cannot reach $BF_URL (connection refused)" ;;
+    22) BF_CONN_ERROR="BF_CONN:HTTP request to $BF_URL was rejected (4xx)" ;;
+    28) BF_CONN_ERROR="BF_CONN:request to $BF_URL timed out" ;;
+    *)  BF_CONN_ERROR="BF_CONN:curl failed against $BF_URL (rc=$1)" ;;
+  esac
+}
+
+# Surface {"error": "..."} payloads AND connection-error sentinels from any
+# API response. Dies on either; otherwise returns silently so callers can
+# assign r=$(...) cleanly.
 check_error() {
   local r="$1"
-  check_conn
+  # Sentinel prefix check: connection failures from bf_curl propagate via this prefix.
+  if [[ "$r" == BF_CONN:* ]]; then
+    die "${r#BF_CONN:}"
+  fi
   local err; err=$(echo "$r" | jq -r '.error // empty' 2>/dev/null)
   [ -n "$err" ] && die "server error: $err"
   return 0
@@ -146,36 +178,9 @@ bf_curl() {
   return "$rc"
 }
 
-# Global error message buffer — when a subshell sees a connection error,
-# it stores the message here and sets the rc. The outer script reads
-# BF_CONN_ERROR at every r=$(bf_X ...) capture point and dies if set.
-# This is the only way to propagate die() across a $() boundary: bash
-# does not propagate exit codes from subshell-die, so we use a side-channel.
+# Global error message buffer — used by bf_curl_msg to construct the
+# BF_CONN: prefix sentinel that survives the $(...) subshell boundary.
 BF_CONN_ERROR=""
-
-# Convert curl exit code to a clear error message and store it in BF_CONN_ERROR.
-# Does NOT call die() — caller (bf_get / bf_post / bf_del) decides when to die.
-bf_curl_msg() {
-  case "$1" in
-    6)  BF_CONN_ERROR="cannot resolve host for $BF_URL" ;;
-    7)  BF_CONN_ERROR="cannot reach $BF_URL (connection refused)" ;;
-    22) BF_CONN_ERROR="HTTP request to $BF_URL was rejected (4xx)" ;;
-    28) BF_CONN_ERROR="request to $BF_URL timed out" ;;
-    *)  BF_CONN_ERROR="curl failed against $BF_URL (rc=$1)" ;;
-  esac
-}
-
-# Called at every `r=$(bf_X ...)` capture point — if BF_CONN_ERROR was set
-# inside the subshell by bf_curl_msg, die here in the parent scope where
-# die() actually exits the script. (Bash cannot propagate exit codes from
-# subshell-die, so we use BF_CONN_ERROR as a side-channel.)
-check_conn() {
-  if [ -n "$BF_CONN_ERROR" ]; then
-    local msg="$BF_CONN_ERROR"
-    BF_CONN_ERROR=""
-    die "$msg"
-  fi
-}
 
 # ── Commands ────────────────────────────────────────────────────────
 
