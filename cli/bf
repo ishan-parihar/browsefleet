@@ -165,6 +165,18 @@ bf_curl_msg() {
   esac
 }
 
+# Called at every `r=$(bf_X ...)` capture point — if BF_CONN_ERROR was set
+# inside the subshell by bf_curl_msg, die here in the parent scope where
+# die() actually exits the script. (Bash cannot propagate exit codes from
+# subshell-die, so we use BF_CONN_ERROR as a side-channel.)
+check_conn() {
+  if [ -n "$BF_CONN_ERROR" ]; then
+    local msg="$BF_CONN_ERROR"
+    BF_CONN_ERROR=""
+    die "$msg"
+  fi
+}
+
 # ── Commands ────────────────────────────────────────────────────────
 
 cmd_health() {
