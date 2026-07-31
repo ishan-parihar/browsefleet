@@ -227,7 +227,7 @@ resolve_sid() {
 }
 
 cmd_session_create() {
-  local fp="" proxy="" profile="" headless="true" timeout="" stealth="" cm="" sm="" vp=""
+  local fp="" proxy="" profile="" headless="true" timeout="" stealth="" cm="" sm="" vp="" om=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --fingerprint|-f) fp="$2"; shift 2 ;;
@@ -276,6 +276,12 @@ EOF
   fi
   if [ -n "$cm" ]; then
     is_enum "$cm" agent human paused operator || die "--control-mode must be one of agent|human|paused|operator, got '$cm'"
+    # "operator" is an alias that flips operatorMode: true so the API
+    # actually sets controlMode: human (the API ignores controlMode in the
+    # POST body and reads operatorMode instead).
+    if [ "$cm" = "operator" ]; then
+      om="true"
+    fi
   fi
   if [ -n "$sm" ]; then
     is_bool "$sm" || die "--sensitive-mode must be true or false, got '$sm'"
@@ -292,6 +298,7 @@ EOF
   body+="\"headless\":$headless"
   [ -n "$timeout" ] && body+=",\"timeout\":$timeout"
   [ -n "$cm" ] && body+=",\"controlMode\":\"$cm\""
+  [ -n "$om" ] && body+=",\"operatorMode\":$om"
   [ -n "$sm" ] && body+=",\"sensitiveMode\":$sm"
   if [ -n "$vp" ]; then
     local w="${vp%x*}" h="${vp#*x}"
