@@ -103,9 +103,16 @@ bf_get() {
   local out rc=0
   out=$(bf_curl "${CURL[@]}" "$BF_URL$1") || rc=$?
   if [ "$rc" -gt 0 ]; then
-    bf_curl_msg "$rc"
-    printf '%s' "$BF_CONN_ERROR"
-    BF_CONN_ERROR=""
+    # HTTP errors (rc=22): curl --fail-with-body wrote the server's body to stdout.
+    # Preserve it so check_error can surface the JSON error. Connection-level failures
+    # (rc 6/7/28/...) produce empty bodies, so substitute the BF_CONN sentinel there.
+    if [ "$rc" -eq 22 ] && [ -n "$out" ]; then
+      printf '%s' "$out"
+    else
+      bf_curl_msg "$rc"
+      printf '%s' "$BF_CONN_ERROR"
+      BF_CONN_ERROR=""
+    fi
     return 0
   fi
   printf '%s' "$out"
@@ -117,9 +124,13 @@ bf_post() {
   local out rc=0
   out=$(bf_curl "${CURL[@]}" -X POST -H 'Content-Type: application/json' -d "$body" "$BF_URL$1") || rc=$?
   if [ "$rc" -gt 0 ]; then
-    bf_curl_msg "$rc"
-    printf '%s' "$BF_CONN_ERROR"
-    BF_CONN_ERROR=""
+    if [ "$rc" -eq 22 ] && [ -n "$out" ]; then
+      printf '%s' "$out"
+    else
+      bf_curl_msg "$rc"
+      printf '%s' "$BF_CONN_ERROR"
+      BF_CONN_ERROR=""
+    fi
     return 0
   fi
   printf '%s' "$out"
@@ -129,9 +140,13 @@ bf_del() {
   local out rc=0
   out=$(bf_curl "${CURL[@]}" -X DELETE "$BF_URL$1") || rc=$?
   if [ "$rc" -gt 0 ]; then
-    bf_curl_msg "$rc"
-    printf '%s' "$BF_CONN_ERROR"
-    BF_CONN_ERROR=""
+    if [ "$rc" -eq 22 ] && [ -n "$out" ]; then
+      printf '%s' "$out"
+    else
+      bf_curl_msg "$rc"
+      printf '%s' "$BF_CONN_ERROR"
+      BF_CONN_ERROR=""
+    fi
     return 0
   fi
   printf '%s' "$out"
@@ -143,7 +158,7 @@ bf_curl_msg() {
   case "$1" in
     6)  BF_CONN_ERROR="BF_CONN:cannot resolve host for $BF_URL" ;;
     7)  BF_CONN_ERROR="BF_CONN:cannot reach $BF_URL (connection refused)" ;;
-    22) BF_CONN_ERROR="BF_CONN:HTTP request to $BF_URL was rejected (4xx)" ;;
+    22) BF_CONN_ERROR="BF_CONN:HTTP request to $BF_URL was rejected (4xx) with no error body" ;;
     28) BF_CONN_ERROR="BF_CONN:request to $BF_URL timed out" ;;
     *)  BF_CONN_ERROR="BF_CONN:curl failed against $BF_URL (rc=$1)" ;;
   esac
