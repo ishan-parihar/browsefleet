@@ -152,12 +152,25 @@ export class BrowserSession {
 
   toApiObject(): Session {
     const { CDP_EXTERNAL_SCHEME, CDP_EXTERNAL_HOST, CDP_EXTERNAL_PORT } = config;
+    
+    // Construct CDP URL without port when using standard ports (80/443)
+    // This handles Cloudflare tunnel and reverse proxy scenarios
+    const cdpHost = CDP_EXTERNAL_PORT === 443 || CDP_EXTERNAL_PORT === 80
+      ? CDP_EXTERNAL_HOST
+      : `${CDP_EXTERNAL_HOST}:${CDP_EXTERNAL_PORT}`;
+    
+    // Construct viewer/events URLs - use standard HTTP(S) without port for public URLs
+    const httpScheme = CDP_EXTERNAL_SCHEME === 'wss' ? 'https' : 'http';
+    const viewerHost = CDP_EXTERNAL_PORT === 443 || CDP_EXTERNAL_PORT === 80
+      ? CDP_EXTERNAL_HOST
+      : `${CDP_EXTERNAL_HOST}:${CDP_EXTERNAL_PORT}`;
+    
     return {
       id: this.id,
       status: this._status,
-      websocketUrl: `${CDP_EXTERNAL_SCHEME}://${CDP_EXTERNAL_HOST}:${CDP_EXTERNAL_PORT}/cdp/${this.id}`,
-      viewerUrl: `http://${CDP_EXTERNAL_HOST}:${CDP_EXTERNAL_PORT}/v1/sessions/${this.id}/live`,
-      eventsUrl: `http://${CDP_EXTERNAL_HOST}:${CDP_EXTERNAL_PORT}/v1/sessions/${this.id}/events`,
+      websocketUrl: `${CDP_EXTERNAL_SCHEME}://${cdpHost}/cdp/${this.id}`,
+      viewerUrl: `${httpScheme}://${viewerHost}/v1/sessions/${this.id}/live`,
+      eventsUrl: `${httpScheme}://${viewerHost}/v1/sessions/${this.id}/events`,
       createdAt: this.createdAt.toISOString(),
       expiresAt: this.expiresAt.toISOString(),
       timeout: this.timeout,

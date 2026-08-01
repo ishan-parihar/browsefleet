@@ -3,12 +3,20 @@ services:
     build: .
     env_file: .env
     ports:
-      - '3000:3000'
+      # Only bind to localhost — never expose 3000 to the public internet.
+      # Cloudflare tunnel (host service) is the public entrypoint.
+      - '127.0.0.1:3000:3000'
     environment:
       - DATA_DIR=/data
-      - CDP_EXTERNAL_HOST=localhost
-      - CDP_EXTERNAL_PORT=3000
-      - CDP_EXTERNAL_SCHEME=ws
+      # CDP_EXTERNAL_* is what the API reports to clients when constructing
+      # the WebSocket URL on a session object. Override via .env to point
+      # at the public hostname once Cloudflare tunnel is configured:
+      #   CDP_EXTERNAL_HOST=browsefleet.yourdomain.com
+      #   CDP_EXTERNAL_PORT=443
+      #   CDP_EXTERNAL_SCHEME=wss
+      - CDP_EXTERNAL_HOST=${CDP_EXTERNAL_HOST:-localhost}
+      - CDP_EXTERNAL_PORT=${CDP_EXTERNAL_PORT:-3000}
+      - CDP_EXTERNAL_SCHEME=${CDP_EXTERNAL_SCHEME:-ws}
     volumes:
       - browsefleet-data:/data
       # Cache CloakBrowser binary across rebuilds

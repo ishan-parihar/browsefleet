@@ -23,7 +23,11 @@
 # Configuration lives in the user's shell rc, not in the CLI binary:
 #        export BROWSEFLEET_URL=https://your-browsefleet-host
 #        export BROWSEFLEET_TOKEN=your-api-key
-#        export BROWSEFLEET_CDP_URL=https://your-browsefleet-host   # optional rewrite
+#        export BROWSEFLEET_CDP_URL=wss://your-browsefleet-host   # optional rewrite for Cloudflare/reverse proxy
+#
+# For Cloudflare tunnels or reverse proxies:
+#   BROWSEFLEET_URL=https://browsefleet.yourdomain.com
+#   BROWSEFLEET_CDP_URL=wss://browsefleet.yourdomain.com  (without port)
 #
 # Set both env vars and run `bf health`. The CLI does not phone home.
 

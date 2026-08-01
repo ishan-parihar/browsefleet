@@ -81,6 +81,49 @@ bf session release <sid>
 
 The CLI uses only Bash + `curl` + `jq`; `bf axi` additionally needs `npx` (it shells out to `chrome-devtools-axi`). No npm dependencies are bundled into `bf`.
 
+### Cloudflare Tunnel Setup
+
+For zero-trust access without opening ports:
+
+**Automated (fresh server):**
+```bash
+sudo git clone https://github.com/ishan-parihar/browsefleet.git /opt/browsefleet
+cd /opt/browsefleet
+sudo ./scripts/bootstrap-fresh-install.sh browsefleet.yourdomain.com
+```
+
+**Manual:**
+```bash
+# 1. Install and authenticate cloudflared
+curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
+echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/cloudflared.list
+apt update && apt install -y cloudflared
+cloudflared tunnel login
+
+# 2. Create and configure tunnel
+cloudflared tunnel create browsefleet
+cat > /etc/cloudflared/config.yml << EOF
+tunnel: <tunnel-id>
+credentials-file: /root/.cloudflared/<tunnel-id>.json
+ingress:
+  - hostname: browsefleet.yourdomain.com
+    service: http://127.0.0.1:3000
+    originRequest:
+      noTLSVerify: true
+  - service: http_status:404
+EOF
+
+# 3. Add DNS and start
+cloudflared tunnel route dns browsefleet browsefleet.yourdomain.com
+cloudflared service install
+systemctl enable --now cloudflared
+
+# 4. Configure BrowseFleet
+echo 'CDP_EXTERNAL_HOST=browsefleet.yourdomain.com' >> /opt/browsefleet/.env
+echo 'CDP_EXTERNAL_PORT=443' >> /opt/browsefleet/.env
+echo 'CDP_EXTERNAL_SCHEME=wss' >> /opt/browsefleet/.env
+```
+
 ## Auth
 
 BrowseFleet authentication is **on by default** the moment you set `API_KEYS`. The check uses constant-time comparison; per-key and per-IP rate limits apply; security headers are set on every response.

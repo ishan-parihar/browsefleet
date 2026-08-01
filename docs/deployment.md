@@ -227,12 +227,119 @@ Put the task behind an ALB with a target group on port 3000. Health check path `
 
 Configure target tracking on CPU utilization (target 50%) or on the number of active sessions if you publish a CloudWatch metric for it. Note that each new task starts cold and adds latency on first request, so scale up generously.
 
+## Recipe 4: Cloudflare Tunnel (Zero-Trust Access)
+
+Expose BrowseFleet without opening ports. Works behind NAT/firewalls. Free tier available.
+
+### Automated Setup (Recommended)
+
+```bash
+# Clone repo and run bootstrap (does everything: Docker, BrowseFleet, cloudflared, DNS)
+sudo git clone https://github.com/ishan-parihar/browsefleet.git /opt/browsefleet
+cd /opt/browsefleet
+sudo ./scripts/bootstrap-fresh-install.sh browsefleet.yourdomain.com
+```
+
+The script will:
+1. Install Docker + docker-compose
+2. Clone/build BrowseFleet
+3. Generate API keys and configure `.env`
+4. Start BrowseFleet container
+5. Install cloudflared, create tunnel, route DNS
+6. Configure tunnel with WebSocket support for `/cdp/*`
+7. Start cloudflared as a systemd service
+
+### Manual Setup
+
+If you prefer manual control:
+
+#### 1. Install cloudflared
+
+```bash
+# Debian/Ubuntu
+curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
+echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/cloudflared.list
+apt update && apt install -y cloudflared
+
+# Authenticate
+cloudflared tunnel login
+```
+
+#### 2. Create tunnel
+
+```bash
+cloudflared tunnel create browsefleet
+# Note the tunnel ID from output
+```
+
+#### 3. Configure tunnel
+
+Create `/etc/cloudflared/config.yml`:
+
+```yaml
+tunnel: <tunnel-id>
+credentials-file: /root/.cloudflared/<tunnel-id>.json
+ingress:
+  - hostname: browsefleet.yourdomain.com
+    service: http://127.0.0.1:3000
+    originRequest:
+      noTLSVerify: true
+      connectTimeout: 30s
+  - service: http_status:404
+```
+
+**Key point**: The `originRequest` block with `noTLSVerify: true` enables WebSocket upgrades for the CDP proxy (`/cdp/*`). Cloudflare tunnels automatically handle WebSocket upgrades when the origin service is configured correctly.
+
+#### 4. Add DNS record
+
+```bash
+cloudflared tunnel route dns browsefleet browsefleet.yourdomain.com
+```
+
+#### 5. Configure BrowseFleet
+
+```bash
+# /opt/browsefleet/.env
+API_KEYS=<your-api-keys>
+CDP_EXTERNAL_HOST=browsefleet.yourdomain.com
+CDP_EXTERNAL_PORT=443
+CDP_EXTERNAL_SCHEME=wss
+```
+
+#### 6. Start tunnel
+
+```bash
+cloudflared service install
+systemctl enable --now cloudflared
+```
+
+#### 7. Verify
+
+```bash
+# HTTP endpoint
+curl -H "x-api-key: <key>" https://browsefleet.yourdomain.com/health
+
+# WebSocket (CDP) endpoint
+curl -H "Connection: Upgrade" -H "Upgrade: websocket" -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" https://browsefleet.yourdomain.com/cdp/test
+```
+
+### Quick Tunnel Config Fix
+
+If you already have a tunnel running but WebSocket isn't working, run:
+
+```bash
+sudo ./scripts/setup-cloudflare-tunnel.sh
+```
+
+This script updates `/etc/cloudflared/config.yml` with the correct `originRequest` settings for WebSocket support and restarts cloudflared.
+
 ## Production checklist (all recipes)
 
 - [ ] `API_KEYS` is set to a non-empty list.
 - [ ] `HOST=127.0.0.1` if behind a reverse proxy on the same host, or use a firewall otherwise.
 - [ ] TLS terminates somewhere in front of BrowseFleet. Do not expose port 3000 directly to the internet.
 - [ ] `CDP_EXTERNAL_HOST` and `CDP_EXTERNAL_SCHEME=wss` match how clients reach the CDP proxy.
+- [ ] For Cloudflare tunnels: `CDP_EXTERNAL_PORT=443` (not 3000).
 - [ ] `LOG_LEVEL=info` (not `debug`, not `trace`).
 - [ ] `DATA_DIR` is on a persistent volume.
 - [ ] `--shm-size=2g` or equivalent is set.
