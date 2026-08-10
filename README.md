@@ -1,5 +1,7 @@
 # BrowseFleet
 
+<!-- T2I HERO SPEC — Subject: a fleet of stealth browser instances (Chrome windows) converging through a tunnel (Cloudflare) toward a single endpoint serving an AI agent — sessions, screenshots, PDFs, network captures flowing as data streams. Composition: fleet left → tunnel center → single REST+CDP endpoint right → agent terminal; subtle motion lines. Palette: deep navy #0b1026 → cyan #22d3ee data flows → emerald #34d399 success flashes. Style: flat vector, dark infra aesthetic, glowing streams, no text. 16:9. -->
+
 <p align="center">
   <img src="./assets/readme/hero.svg" width="100%" alt="BrowseFleet: self-hosted stealth browser fleet — agent bf CLI drives sessions, scraping, screenshots, PDFs, and raw CDP through a Cloudflare tunnel to one REST + CDP endpoint operating a pool of CloakBrowser Pro Chromium instances">
 </p>
@@ -17,6 +19,19 @@ Self-hosted stealth browser fleet for AI agents. REST + CDP behind one endpoint 
 - **Stealth that holds.** [CloakBrowser](https://github.com/CloakHQ/CloakBrowser) Pro: 71 C++ source-level patches (canvas, WebGL, audio, fonts, GPU, WebRTC, automation signals) — invisible to `navigator.webdriver` probes, `BrowserScan`, FingerprintJS, reCAPTCHA v3 (0.9 score), Cloudflare Turnstile, DataDome tier-1.
 - **Built for AI agents.** The `bf` CLI on the agent host turns sessions, screenshots, network captures, and chrome-devtools-axi calls into a one-line verb. Works from any VPS, any CI runner, any container.
 - **Self-hostable on a $4/mo box.** One Node process, one SQLite file, one Docker container. No Redis, no Postgres, no phone-home.
+
+## How it compares
+
+| Capability | **BrowseFleet** | Playwright/Puppeteer | Scrapy | Browserless / Bright Data |
+|---|---|---|---|---|
+| **Stealth at the binary level** | ✅ CloakBrowser Pro: 71 C++ patches (canvas/WebGL/audio/fonts/GPU/WebRTC/automation) | ❌ detectable (`navigator.webdriver`, fingerprints) | ❌ none | ⚠️ some |
+| **One HTTP + CDP endpoint** | ✅ REST + raw CDP behind one host, agent-friendly | ❌ per-script | ❌ per-spider | ✅ (paid) |
+| **AI-agent native CLI** | ✅ `bf` one-line verb for sessions/screenshots/axi/network | ⚠️ via wrappers | ❌ | ❌ |
+| **Profile persistence** | ✅ per-account profiles | ⚠️ limited | ❌ | ✅ |
+| **Self-hosted cost** | ✅ one Node process + SQLite + Docker on a $4/mo box | ✅ | ✅ | ❌ per-GB pricing |
+| **Scraping + browser + PDF + CDP in one tool** | ✅ | ⚠️ browser only | ❌ HTTP only | ✅ (paid) |
+
+Playwright automates a browser you can see; BrowseFleet operates a **stealth fleet** behind one endpoint you own — built for agents that need undetected, persistent, scriptable browsing at scale.
 
 ```mermaid
 flowchart LR
