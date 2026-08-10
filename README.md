@@ -1,5 +1,9 @@
 # BrowseFleet
 
+<p align="center">
+  <img src="./assets/readme/hero.svg" width="100%" alt="BrowseFleet: self-hosted stealth browser fleet — agent bf CLI drives sessions, scraping, screenshots, PDFs, and raw CDP through a Cloudflare tunnel to one REST + CDP endpoint operating a pool of CloakBrowser Pro Chromium instances">
+</p>
+
 Self-hosted stealth browser fleet for AI agents. REST + CDP behind one endpoint you operate. CloakBrowser Pro under the hood.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)

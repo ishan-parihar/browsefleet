@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="1200" height="360" viewBox="0 0 1200 360"
+     role="img" aria-labelledby="title desc">
+  <title id="title">BrowseFleet — self-hosted stealth browser fleet</title>
+  <desc id="desc">One REST + CDP endpoint operates a fleet of CloakBrowser stealth Chromium instances. The bf CLI on the agent host drives sessions, scraping, screenshots, PDFs, and raw CDP through a Cloudflare tunnel.</desc>
+
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0B0F14"/>
+      <stop offset="1" stop-color="#070A0E"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="360" rx="24" fill="url(#bg)"/>
+  <rect x="1" y="1" width="1198" height="358" rx="23" fill="none" stroke="#1B2430" stroke-width="2"/>
+
+  <!-- ══════════ LEFT: IDENTITY ══════════ -->
+  <g transform="translate(56 38)">
+    <text x="0" y="0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="19" letter-spacing="4" fill="#2496ED">SELF-HOSTED BROWSER FLEET</text>
+
+    <text x="0" y="68" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+          font-size="60" font-weight="800" fill="#ECF0F7" letter-spacing="-1.5">BrowseFleet</text>
+
+    <text x="0" y="116" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+          font-size="23" font-weight="600" fill="#A8B2C4">Stealth browsers for AI agents —</text>
+    <text x="0" y="148" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+          font-size="23" font-weight="600" fill="#A8B2C4">REST + CDP behind one endpoint</text>
+    <text x="0" y="180" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+          font-size="23" font-weight="600" fill="#A8B2C4">you operate. CloakBrowser Pro inside.</text>
+
+    <text x="0" y="228" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="16" fill="#667088">Node · one process · one SQLite · one container</text>
+    <text x="0" y="254" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="16" fill="#667088">$4/mo VPS · no phone-home · API-key auth</text>
+  </g>
+
+  <!-- ══════════ RIGHT: FLEET ARCHITECTURE ══════════ -->
+  <g transform="translate(616 40)">
+    <!-- agent host -->
+    <g transform="translate(0 60)">
+      <rect x="0" y="0" width="120" height="84" rx="10" fill="#141C26" stroke="#2496ED" stroke-width="1.5"/>
+      <text x="60" y="26" text-anchor="middle" font-family="ui-monospace, Menlo, monospace"
+            font-size="14" fill="#8FA7C4">AGENT</text>
+      <text x="60" y="48" text-anchor="middle" font-family="ui-monospace, Menlo, monospace"
+            font-size="12" fill="#4E5E7A">bf CLI</text>
+      <text x="60" y="66" text-anchor="middle" font-family="ui-monospace, Menlo, monospace"
+            font-size="12" fill="#4E5E7A">vps / ci / container</text>
+    </g>
+
+    <!-- API node -->
+    <g transform="translate(190 60)">
+      <rect x="0" y="0" width="120" height="84" rx="10" fill="#141C26" stroke="#2496ED" stroke-width="2"/>
+      <text x="60" y="26" text-anchor="middle" font-family="ui-monospace, Menlo, monospace"
+            font-size="14" fill="#8FA7C4">API</text>
+      <text x="60" y="48" text-anchor="middle" font-family="ui-monospace, Menlo, monospace"
+            font-size="12" fill="#4E5E7A">:3000</text>
+      <text x="60" y="66" text-anchor="middle" font-family="ui-monospace, Menlo, monospace"
+            font-size="12" fill="#4E5E7A">REST + CDP proxy</text>
+    </g>
+
+    <!-- browser pool -->
+    <g transform="translate(380 30)">
+      <text x="0" y="14" font-family="ui-monospace, Menlo, monospace" font-size="12" letter-spacing="1" fill="#4E5E7A">BROWSER POOL</text>
+      <rect x="0" y="26" width="52" height="44" rx="8" fill="#16202C" stroke="#2496ED"/>
+      <circle cx="26" cy="44" r="10" fill="none" stroke="#2496ED" stroke-width="1.5"/>
+      <rect x="22" y="38" width="8" height="12" rx="2" fill="#2496ED"/>
+      <rect x="60" y="26" width="52" height="44" rx="8" fill="#16202C" stroke="#2496ED"/>
+      <circle cx="86" cy="44" r="10" fill="none" stroke="#2496ED" stroke-width="1.5"/>
+      <rect x="82" y="38" width="8" height="12" rx="2" fill="#2496ED"/>
+      <rect x="120" y="26" width="52" height="44" rx="8" fill="#16202C" stroke="#2496ED"/>
+      <circle cx="146" cy="44" r="10" fill="none" stroke="#2496ED" stroke-width="1.5"/>
+      <rect x="142" y="38" width="8" height="12" rx="2" fill="#2496ED"/>
+      <text x="178" y="52" font-family="ui-monospace, Menlo, monospace" font-size="14" fill="#4E5E7A">×N</text>
+      <text x="0" y="88" font-family="ui-monospace, Menlo, monospace" font-size="12" fill="#4E5E7A">CloakBrowser Pro Chromium</text>
+    </g>
+
+    <!-- connections -->
+    <g stroke="#2496ED" stroke-width="2" fill="none" opacity="0.8">
+      <path d="M 120 102 C 150 102 150 102 190 102" marker-end="url(#arr)"/>
+      <path d="M 310 102 C 340 102 340 76 380 76" marker-end="url(#arr)"/>
+    </g>
+
+    <!-- stealth note -->
+    <g transform="translate(0 168)">
+      <rect x="0" y="0" width="524" height="40" rx="8" fill="#0F151D" stroke="#1B2430"/>
+      <text x="16" y="25" font-family="ui-monospace, Menlo, monospace" font-size="13" fill="#8FA7C4">71 C++ source-level patches · passes BrowserScan · Turnstile · reCAPTCHA v3 0.9</text>
+    </g>
+  </g>
+
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2496ED"/>
+    </marker>
+  </defs>
+</svg>
