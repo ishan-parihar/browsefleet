@@ -9,7 +9,10 @@
 Self-hosted stealth browser fleet for AI agents. REST + CDP behind one endpoint you operate. CloakBrowser Pro under the hood.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
-![LOC](https://img.shields.io/badge/LOC-3.7K-informational?style=flat-square)
+![LOC](https://img.shields.io/badge/LOC-4.6K-informational?style=flat-square)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript)
+![Status](https://img.shields.io/badge/Status-Active-brightgreen)
+<a href="https://github.com/ishan-parihar/browsefleet/actions/workflows/ci.yml"><img src="https://github.com/ishan-parihar/browsefleet/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
 [![Node](https://img.shields.io/badge/node-%3E%3D20-43853d.svg)](./.nvmrc)
 [![Docker](https://img.shields.io/badge/docker-ghcr.io%2Ftherjmurray%2Fbrowsefleet-2496ed.svg)](https://github.com/ishan-parihar/browsefleet/pkgs/container/browsefleet)
 [![Auth](https://img.shields.io/badge/auth-API%20keys%20%2B%20timing--safe%20compare-0f766e.svg)](#auth)
@@ -254,9 +257,7 @@ Three recipes in [`docs/deployment.md`](./docs/deployment.md):
 
 All three are copy-paste deployable. Chrome wants roughly 200 MB RAM per active stealth session with CloakBrowser Pro.
 
-## Contributing
-
-PRs welcome. Read [`CONTRIBUTING.md`](./CONTRIBUTING.md) for the workflow, [`skill.md`](./skill.md) for the exact setup commands. Conventional Commits, squash-merge, base branch is `master`.
+**Contributing** — PRs welcome. See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for the workflow and `skill.md` for exact setup commands.
 
 ## Security
 
