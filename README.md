@@ -9,6 +9,7 @@
 Self-hosted stealth browser fleet for AI agents. REST + CDP behind one endpoint you operate. CloakBrowser Pro under the hood.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+![LOC](https://img.shields.io/badge/LOC-3.7K-informational?style=flat-square)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-43853d.svg)](./.nvmrc)
 [![Docker](https://img.shields.io/badge/docker-ghcr.io%2Ftherjmurray%2Fbrowsefleet-2496ed.svg)](https://github.com/ishan-parihar/browsefleet/pkgs/container/browsefleet)
 [![Auth](https://img.shields.io/badge/auth-API%20keys%20%2B%20timing--safe%20compare-0f766e.svg)](#auth)
@@ -268,3 +269,14 @@ MIT. See [`LICENSE`](./LICENSE).
 ## Acknowledgements
 
 Built on [Hono](https://hono.dev/), [puppeteer-core](https://pptr.dev/), [CloakBrowser](https://github.com/CloakHQ/CloakBrowser), [better-sqlite3](https://github.com/WiseLibs/better-sqlite3), [Mozilla Readability](https://github.com/mozilla/readability), and the [chrome-devtools-mcp](https://github.com/ChromeDevTools/chrome-devtools-mcp) / [chrome-devtools-axi](https://www.npmjs.com/package/chrome-devtools-axi) protocol bridges.
+
+---
+
+## ☕ Support & Sponsorship
+
+If you find this project useful, consider supporting ongoing development:
+
+[![Sponsor](https://img.shields.io/badge/Sponsor-GitHub%20Sponsors-ea4aaa?style=flat-square&logo=github)](https://github.com/sponsors/ishan-parihar)
+[![Donate](https://img.shields.io/badge/Donate-Razorpay-3395FF?style=flat-square)](https://rzp.io/rzp/ishan-parihar)
+
+Your support funds new features, releases, and infrastructure for the whole ecosystem.
