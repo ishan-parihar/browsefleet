@@ -40,6 +40,18 @@ export interface AgentResult {
   totalIterations: number;
 }
 
+/**
+ * Streaming event emitted by `runAgent` when an `onEvent` callback is provided.
+ * Lets one loop implementation serve both the plain JSON endpoints and the
+ * SSE stream route (previously the stream route duplicated the whole loop).
+ */
+export type AgentEvent =
+  | { type: 'screenshot'; iteration: number; screenshot: string }
+  | { type: 'step'; iteration: number; reasoning: string; actions: AgentAction[] }
+  | { type: 'done'; result: string; totalIterations: number }
+  | { type: 'fail'; reason: string; totalIterations: number }
+  | { type: 'error'; error: string; iteration?: number };
+
 // ─── LLM Providers ─────────────────────────────────────────────────────────
 
 async function callAnthropic(
@@ -189,7 +201,11 @@ async function executeAction(page: Page, action: AgentAction): Promise<void> {
 
 // ─── Agent Loop ────────────────────────────────────────────────────────────
 
-export async function runAgent(page: Page, request: AgentRequest): Promise<AgentResult> {
+export async function runAgent(
+  page: Page,
+  request: AgentRequest,
+  onEvent?: (event: AgentEvent) => void,
+): Promise<AgentResult> {
   const provider = request.provider ?? 'anthropic';
   const model = request.model ?? (provider === 'anthropic' ? 'claude-sonnet-4-20250514' : 'gpt-4o');
   const maxIterations = Math.min(request.maxIterations ?? 15, 30);
@@ -197,9 +213,11 @@ export async function runAgent(page: Page, request: AgentRequest): Promise<Agent
     request.apiKey ?? (provider === 'anthropic' ? config.ANTHROPIC_API_KEY : config.OPENAI_API_KEY);
 
   if (!llmApiKey) {
+    const error = `No API key configured for ${provider}. Set ${provider === 'anthropic' ? 'ANTHROPIC_API_KEY' : 'OPENAI_API_KEY'} or pass apiKey in request.`;
+    onEvent?.({ type: 'error', error });
     return {
       success: false,
-      error: `No API key configured for ${provider}. Set ${provider === 'anthropic' ? 'ANTHROPIC_API_KEY' : 'OPENAI_API_KEY'} or pass apiKey in request.`,
+      error,
       steps: [],
       totalIterations: 0,
     };
@@ -218,6 +236,7 @@ export async function runAgent(page: Page, request: AgentRequest): Promise<Agent
   for (let i = 0; i < maxIterations; i++) {
     // Take screenshot
     const screenshotBuffer = (await page.screenshot({ encoding: 'base64', type: 'png' })) as string;
+    onEvent?.({ type: 'screenshot', iteration: i, screenshot: screenshotBuffer });
 
     // Build message
     const userMessage = buildUserMessage(request.task, i, maxIterations);
@@ -230,13 +249,15 @@ export async function runAgent(page: Page, request: AgentRequest): Promise<Agent
       response = await callLLM(llmApiKey, model, SYSTEM_PROMPT, userMessage, screenshotBuffer);
     } catch (err: any) {
       logger.error({ error: err.message, iteration: i }, 'Agent LLM call failed');
+      const error = err.message;
+      onEvent?.({ type: 'error', error, iteration: i });
       steps.push({
         iteration: i,
-        reasoning: `LLM error: ${err.message}`,
+        reasoning: `LLM error: ${error}`,
         actions: [],
         screenshot: screenshotBuffer,
       });
-      return { success: false, error: err.message, steps, totalIterations: i + 1 };
+      return { success: false, error, steps, totalIterations: i + 1 };
     }
 
     const step: AgentStep = {
@@ -246,6 +267,7 @@ export async function runAgent(page: Page, request: AgentRequest): Promise<Agent
       screenshot: screenshotBuffer,
     };
     steps.push(step);
+    onEvent?.({ type: 'step', iteration: i, reasoning: response.reasoning, actions: response.actions });
 
     logger.info(
       { iteration: i, reasoning: response.reasoning, actionCount: response.actions.length },
@@ -255,9 +277,11 @@ export async function runAgent(page: Page, request: AgentRequest): Promise<Agent
     // Check for terminal actions
     for (const action of response.actions) {
       if (action.type === 'done') {
+        onEvent?.({ type: 'done', result: action.result, totalIterations: i + 1 });
         return { success: true, result: action.result, steps, totalIterations: i + 1 };
       }
       if (action.type === 'fail') {
+        onEvent?.({ type: 'fail', reason: action.reason, totalIterations: i + 1 });
         return { success: false, error: action.reason, steps, totalIterations: i + 1 };
       }
     }

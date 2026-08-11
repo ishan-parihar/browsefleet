@@ -15,6 +15,10 @@ const schema = z.object({
   MAX_SESSION_TIMEOUT: z.coerce.number().default(86_400_000),
   CHROME_PATH: z.string().default(''),
 
+  // Rate limiting — token bucket per key (API key, else client IP)
+  RATE_LIMIT_PER_SECOND: z.coerce.number().default(10),
+  RATE_LIMIT_BURST: z.coerce.number().default(20),
+
   // ponytail: STEALTH_DEFAULT is kept for API compatibility but CloakBrowser
   // handles all stealth at the C++ level. 'none' falls back to vanilla
   // puppeteer-core; 'basic' and 'full' both use CloakBrowser's patched binary.
