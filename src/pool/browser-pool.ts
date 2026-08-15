@@ -8,7 +8,7 @@ import type { CreateSessionRequest } from '../types.js';
 import type { Browser } from 'puppeteer-core';
 
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
-import { profileExists, profileUserDataDir, touchProfile } from '../routes/profiles.js';
+import { profileExists, profileUserDataDir, touchProfile, loadProfileCookies } from '../routes/profiles.js';
 
 export class BrowserPool {
   private sessions = new Map<string, BrowserSession>();
@@ -150,6 +150,21 @@ export class BrowserPool {
     // Set extra headers if provided
     if (opts.headers) {
       await sessionPage.setExtraHTTPHeaders(opts.headers);
+    }
+
+    // Restore saved profile cookies (persistent logins). Runs before any
+    // opts.cookies so explicit per-session cookies win on name collision.
+    if (opts.profileId) {
+      const saved = loadProfileCookies(opts.profileId);
+      if (saved && saved.length > 0) {
+        try {
+          const cdp = await browser.target().createCDPSession();
+          await cdp.send('Storage.setCookies', { cookies: saved });
+          cdp.detach();
+        } catch (err: any) {
+          console.error(`[session ${id}] failed to restore profile cookies: ${err?.message ?? err}`);
+        }
+      }
     }
 
     // Inject cookies if provided

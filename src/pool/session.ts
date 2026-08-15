@@ -1,6 +1,7 @@
 import type { Browser, Page } from 'puppeteer-core';
 import type { Session, CreateSessionRequest, SessionControlMode } from '../types.js';
 import { config } from '../config.js';
+import { saveProfileCookies } from '../routes/profiles.js';
 
 export class BrowserSession {
   readonly id: string;
@@ -141,6 +142,24 @@ export class BrowserSession {
     this._status = 'released';
     this.releasedAt = new Date();
     clearTimeout(this.expiryTimer);
+
+    // Persist session cookies back to the profile so logins survive restarts.
+    // Chrome only flushes persistent cookies to its SQLite store on clean
+    // shutdown — session cookies (expires=-1) never hit disk, so we capture
+    // them via CDP and stash them in the profile's cookies.json for re-inject
+    // on the next session create.
+    if (this.options.profileId) {
+      try {
+        const cdp = await this.browser.target().createCDPSession();
+        const { cookies } = await cdp.send('Storage.getCookies');
+        await saveProfileCookies(this.options.profileId, cookies);
+        cdp.detach();
+      } catch (err: any) {
+        // Non-fatal: logins simply won't persist if capture fails.
+        console.error(`[session ${this.id}] failed to persist cookies to profile: ${err?.message ?? err}`);
+      }
+    }
+
     await this.browser.close().catch(() => {});
   }
 

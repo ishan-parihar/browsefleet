@@ -4,6 +4,16 @@ All notable changes to BrowseFleet are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0](https://github.com/ishan-parihar/browsefleet/compare/v1.0.1...v1.1.0) (2026-08-15)
+
+### Features
+
+* persistent profile logins — session cookies now save to the profile on release and restore on create, so browser sessions survive restarts without re-login
+
+### Bug Fixes
+
+* profile cookie persistence was dead code — `saveProfileCookies`/`loadProfileCookies` are now wired into the session lifecycle (capture via `Storage.getCookies` on release, re-inject via `Storage.setCookies` on create)
+
 ## [1.0.1](https://github.com/theRJMurray/browsefleet/compare/v1.0.0...v1.0.1) (2026-05-26)
 
 
