@@ -5,6 +5,13 @@
 set -euo pipefail
 
 # ── Config ──────────────────────────────────────────────────────────
+# Self-contained env: when BROWSEFLEET_URL is unset (non-interactive SSH,
+# cron, agent shells that never source ~/.profile), fall back to the
+# dedicated env file so bf works from any invocation context.
+if [ -z "${BROWSEFLEET_URL:-}" ] && [ -f "${BROWSEFLEET_ENV_FILE:-$HOME/.browsefleet.env}" ]; then
+  # shellcheck disable=SC1090
+  source "${BROWSEFLEET_ENV_FILE:-$HOME/.browsefleet.env}"
+fi
 BF_URL="${BROWSEFLEET_URL:-http://localhost:3000}"
 BF_TOKEN="${BROWSEFLEET_TOKEN:-}"
 BF_CDP_URL="${BROWSEFLEET_CDP_URL:-$BF_URL}"
@@ -1069,7 +1076,7 @@ EOF
 # Global flags
 while [ $# -gt 0 ]; do
   case "${1:-}" in
-    -v|--version) echo "bf 0.1.0"; exit 0 ;;
+    -v|--version) echo "bf 1.1.0"; exit 0 ;;
     -h|--help) cmd_help; exit 0 ;;
     --url) BF_URL="$2"; BF_CDP_URL="${BROWSEFLEET_CDP_URL:-$BF_URL}"; CURL=(curl -sS --fail-with-body --max-time 120); [ -n "$BF_TOKEN" ] && CURL+=(-H "x-api-key: $BF_TOKEN"); shift 2 ;;
     --token) BF_TOKEN="$2"; CURL=(curl -sS --fail-with-body --max-time 120); [ -n "$BF_TOKEN" ] && CURL+=(-H "x-api-key: $BF_TOKEN"); shift 2 ;;
