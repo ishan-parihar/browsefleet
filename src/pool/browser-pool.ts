@@ -9,6 +9,7 @@ import type { Browser } from 'puppeteer-core';
 
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { profileExists, profileUserDataDir, touchProfile, loadProfileCookies } from '../routes/profiles.js';
+import { clearStaleProfileLocks, isProfileLockError } from '../utils/profile-lock-recovery.js';
 
 export class BrowserPool {
   private sessions = new Map<string, BrowserSession>();
@@ -71,9 +72,64 @@ export class BrowserPool {
     };
   }
 
+  /**
+   * Launch puppeteer with auto-recovery on stale profile lock.
+   *
+   * When Chromium crashes (OOM, supervisor SIGKILL, host reboot), it leaves
+   * SingletonLock + SingletonSocket + SingletonCookie in the profile
+   * directory. The next puppeteer.launch() with the same userDataDir then
+   * fails with "The browser is already running for <dir>. Use a different
+   * `userDataDir` or stop the running browser first."
+   *
+   * Recovery: detect that error signature, delete the stale lockfiles,
+   * retry once. If the retry also fails, the lock is real — bubble up.
+   */
+  private async launchWithRecovery(
+    launchFn: () => Promise<Browser>,
+    userDataDir: string | undefined,
+    profileId: string | undefined,
+  ): Promise<Browser> {
+    try {
+      return await launchFn();
+    } catch (err: any) {
+      if (!isProfileLockError(err)) throw err;
+      if (!userDataDir) throw err;
+
+      const recovery = clearStaleProfileLocks(userDataDir);
+      logger.warn(
+        {
+          profileId,
+          userDataDir,
+          removedFiles: recovery.filesRemoved.length,
+          error: (err as Error)?.message?.split('\n')[0],
+        },
+        'profile_lock_recovery: stale lockfiles cleared, retrying launch',
+      );
+
+      // Single retry — if it still fails, the lock is legitimate.
+      return await launchFn();
+    }
+  }
+
   async createSession(opts: CreateSessionRequest = {}, apiKey?: string): Promise<BrowserSession> {
     if (this.sessions.size >= config.MAX_CONCURRENT_SESSIONS) {
       throw new Error(`Maximum concurrent sessions (${config.MAX_CONCURRENT_SESSIONS}) reached`);
+    }
+
+    // #bf-fix-2 (2026-09-10): a profile is single-tenant. A second concurrent
+    // session on the same userDataDir would hit launchWithRecovery, which
+    // deletes the LIVE browser's lockfiles and relaunches — two chromes on
+    // one leveldb = profile corruption + divergent cookie state (the
+    // re-poisoning vector from the linkedin-lyr audit). Refuse instead.
+    if (opts.profileId) {
+      for (const s of this.sessions.values()) {
+        if (s.options.profileId === opts.profileId) {
+          throw Object.assign(
+            new Error(`Profile ${opts.profileId} is already in use by session ${s.id}`),
+            { status: 409 },
+          );
+        }
+      }
     }
 
     const id = opts.sessionId || uuid();
@@ -84,32 +140,44 @@ export class BrowserPool {
 
     let browser: Browser;
     const launchOpts = this.buildLaunchOpts(opts);
+    const userDataDir = launchOpts.launchOptions.userDataDir;
 
     if (opts.stealth === 'none') {
       // ponytail: 'none' = vanilla puppeteer-core, no CloakBrowser patches.
       // Used for internal/utility pages where stealth doesn't matter.
       const { launchOptions, headless, args } = launchOpts;
-      browser = await puppeteerCore.launch({
-        headless,
-        args,
-        executablePath: config.chromePath || undefined,
-        defaultViewport: launchOptions.defaultViewport,
-        userDataDir: launchOptions.userDataDir,
-        timeout: launchOptions.timeout,
-      });
+      browser = await this.launchWithRecovery(
+        () =>
+          puppeteerCore.launch({
+            headless,
+            args,
+            executablePath: config.chromePath || undefined,
+            defaultViewport: launchOptions.defaultViewport,
+            userDataDir,
+            timeout: launchOptions.timeout,
+          }),
+        userDataDir,
+        opts.profileId,
+      );
     } else {
       // The current Pro build detaches network frames when its runtime
       // --fingerprint flag is injected. The binary still provides its compiled
       // patches, so use the documented binary + Puppeteer Core path instead.
       this.cloakBinaryPath ??= ensureBinary(launchOpts.licenseKey);
-      browser = await puppeteerCore.launch({
-        headless: launchOpts.headless,
-        args: launchOpts.args,
-        executablePath: await this.cloakBinaryPath,
-        defaultViewport: launchOpts.launchOptions.defaultViewport,
-        userDataDir: launchOpts.launchOptions.userDataDir,
-        timeout: launchOpts.launchOptions.timeout,
-      });
+      const execPath = await this.cloakBinaryPath;
+      browser = await this.launchWithRecovery(
+        () =>
+          puppeteerCore.launch({
+            headless: launchOpts.headless,
+            args: launchOpts.args,
+            executablePath: execPath,
+            defaultViewport: launchOpts.launchOptions.defaultViewport,
+            userDataDir,
+            timeout: launchOpts.launchOptions.timeout,
+          }),
+        userDataDir,
+        opts.profileId,
+      );
     }
 
     // CloakBrowser Pro's bootstrap target detaches on first navigation.
@@ -230,10 +298,11 @@ export class BrowserPool {
     }
 
     this.cloakBinaryPath ??= ensureBinary(config.CLOAKBROWSER_LICENSE_KEY || undefined);
+    const execPath = await this.cloakBinaryPath;
     this.utilityBrowser = await puppeteerCore.launch({
       headless: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
-      executablePath: await this.cloakBinaryPath,
+      executablePath: execPath,
       defaultViewport: { width: 1280, height: 900 },
       timeout: 30_000,
     });

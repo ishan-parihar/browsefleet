@@ -13,6 +13,12 @@ export interface CreateSessionRequest {
   sensitiveMode?: boolean;
   blockAds?: boolean;
   cookies?: Array<{ name: string; value: string; domain: string; path?: string }>;
+  /**
+   * Persist the session's cookies to the profile on release (default true).
+   * Set false for risky contexts (cross-context cookie migration, challenge
+   * loops) so a revoked jar can never overwrite the profile's good state.
+   */
+  saveCookiesOnRelease?: boolean;
   timezone?: string;
   locale?: string;
   headers?: Record<string, string>;

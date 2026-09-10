@@ -2,6 +2,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { BrowserSession } from '../src/pool/session.js';
 import { config } from '../src/config.js';
 
+vi.mock('../src/routes/profiles.js', () => ({
+  saveProfileCookies: vi.fn().mockResolvedValue(undefined),
+}));
+
 function makeSession(overrides: any = {}) {
   const browser = overrides.browser ?? {
     close: vi.fn().mockResolvedValue(undefined),
@@ -25,6 +29,7 @@ function makeSession(overrides: any = {}) {
 
 describe('BrowserSession', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     vi.useFakeTimers();
   });
 
@@ -131,5 +136,52 @@ describe('BrowserSession', () => {
     const s = makeSession();
     vi.setSystemTime(new Date('2026-01-01T01:00:00Z'));
     expect(s.getBrowserHours()).toBeGreaterThanOrEqual(1);
+  });
+
+  // #bf-fix-1: expiry must close the browser, not leak it.
+  it('closing on expiry releases the browser child', async () => {
+    const browser = {
+      close: vi.fn().mockResolvedValue(undefined),
+      target: vi.fn(),
+    };
+    const s = makeSession({ options: { timeout: 5_000 }, browser });
+    await vi.advanceTimersByTimeAsync(5_001);
+    expect(s.status).toBe('expired');
+    expect(browser.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('release() after expiry is a no-op (no double close)', async () => {
+    const browser = {
+      close: vi.fn().mockResolvedValue(undefined),
+      target: vi.fn(),
+    };
+    const s = makeSession({ options: { timeout: 5_000 }, browser });
+    await vi.advanceTimersByTimeAsync(5_001);
+    await s.release();
+    expect(browser.close).toHaveBeenCalledTimes(1);
+  });
+
+  // #bf-fix-3: default saves cookies; opt-out never calls saveProfileCookies.
+  it('saves profile cookies on release by default', async () => {
+    const { saveProfileCookies } = await import('../src/routes/profiles.js');
+    const browser = {
+      close: vi.fn().mockResolvedValue(undefined),
+      target: () => ({ createCDPSession: async () => ({ send: async () => ({ cookies: [] }), detach: vi.fn() }) }),
+    };
+    const s = makeSession({ options: { timeout: 5_000, profileId: 'p1' }, browser });
+    await s.release();
+    expect(saveProfileCookies).toHaveBeenCalledWith('p1', []);
+  });
+
+  it('skips profile cookie save when saveCookiesOnRelease is false', async () => {
+    const { saveProfileCookies } = await import('../src/routes/profiles.js');
+    const browser = {
+      close: vi.fn().mockResolvedValue(undefined),
+      target: vi.fn(),
+    };
+    const s = makeSession({ options: { timeout: 5_000, profileId: 'p1', saveCookiesOnRelease: false }, browser });
+    await s.release();
+    expect(saveProfileCookies).not.toHaveBeenCalled();
+    expect(browser.close).toHaveBeenCalledTimes(1);
   });
 });

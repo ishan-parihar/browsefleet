@@ -4,6 +4,19 @@ All notable changes to BrowseFleet are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Features
+
+* profile single-tenancy: creating a second concurrent session on the same `profileId` is refused with HTTP 409 instead of deleting a live browser's Chromium lockfiles and corrupting the profile
+* `saveCookiesOnRelease` session option (default `true`): risky contexts (cookie migration, challenge loops) can opt out so a revoked jar never overwrites the profile's persisted cookie store
+* create-session route maps status-carrying errors (409 profile-in-use) instead of collapsing everything into 500
+
+### Bug Fixes
+
+* expired sessions now close their browser child — the expiry path used to mark the session `expired` before `release()`'s active-status guard, leaking an orphaned Chromium that held the profile's SingletonLock and permanently wedged the next create on that profile
+* auth 401 error message test updated to match the Bearer/query-param resolution surface
+
 ## [1.1.0](https://github.com/ishan-parihar/browsefleet/compare/v1.0.1...v1.1.0) (2026-08-15)
 
 ### Features

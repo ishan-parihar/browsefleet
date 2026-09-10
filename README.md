@@ -213,6 +213,7 @@ CloakBrowser auto-downloads on `npm install`; the Pro key unlocks Chromium 150 w
 - **REST + CDP** — high-level endpoints (`/v1/scrape`, `/v1/screenshot`, `/v1/pdf`) plus raw CDP via `/cdp/:id`. The CDP proxy is binary-frame-correct, so `chrome-devtools-mcp` and `chrome-devtools-axi` both work through Cloudflare tunnels.
 - **Stealth** — CloakBrowser Pro: 71 C++ patches. Passes Cloudflare Turnstile, reCAPTCHA v3, DataDome tier-1, FingerprintJS, BrowserScan, sannysoft bot tests.
 - **Persistent profiles** — reuse a Chrome user-data directory across sessions. Useful for any flow that needs to stay logged in.
+- **Profile session safety** — a profile is single-tenant: a second concurrent session on the same profile is refused with `409` (no double-chrome on one user-data dir, no live-lockfile deletion). Cookie persistence on release is explicit (`saveCookiesOnRelease`, default on) so a challenged or revoked session can never overwrite a profile's good state, and expired sessions always close their browser child — no orphaned Chromium holding a profile lock.
 - **Operator mode** — sessions start in `human` control, a real person logs in, then hands off to the agent. State machine: `agent` / `human` / `paused`.
 - **AI agent layer** — built-in vision-based agent (`/v1/agent`) takes a natural-language task and drives the browser using Claude or GPT.
 - **CAPTCHA solving** — plug a 2captcha key into `.env` and call `/v1/sessions/:id/captcha/solve`.

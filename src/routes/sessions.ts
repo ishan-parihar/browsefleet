@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { BrowserPool } from '../pool/browser-pool.js';
 import type { ControlSessionRequest, CreateSessionRequest, ReleaseRequest } from '../types.js';
 import { getOwnedSession } from '../utils/session-auth.js';
+import { resolveApiKey } from '../auth.js';
 
 export function sessionsRoutes(pool: BrowserPool): Hono {
   const app = new Hono();
@@ -11,18 +12,20 @@ export function sessionsRoutes(pool: BrowserPool): Hono {
     const body = await c.req.json<CreateSessionRequest>().catch(() => ({}));
 
     try {
-      const apiKey = c.req.header('x-api-key');
+      const apiKey = resolveApiKey(c);
       const session = await pool.createSession(body, apiKey);
       return c.json(session.toApiObject(), 201);
     } catch (err: any) {
-      const status = err.message?.includes('Maximum') ? 429 : 500;
+      // Status-carrying errors (profile-in-use 409) win; then the classic
+      // capacity 429; everything else is a genuine 500.
+      const status = err.status ?? (err.message?.includes('Maximum') ? 429 : 500);
       return c.json({ error: err.message }, status);
     }
   });
 
   // List sessions (filtered by requesting API key)
   app.get('/', (c) => {
-    const apiKey = c.req.header('x-api-key');
+    const apiKey = resolveApiKey(c);
     const sessions = pool
       .listSessions()
       .filter((s) => !s.apiKey || !apiKey || s.apiKey === apiKey)
@@ -32,7 +35,7 @@ export function sessionsRoutes(pool: BrowserPool): Hono {
 
   // Get session
   app.get('/:id', (c) => {
-    const apiKey = c.req.header('x-api-key');
+    const apiKey = resolveApiKey(c);
     let session;
     try {
       session = getOwnedSession(pool, c.req.param('id'), apiKey);
@@ -44,7 +47,7 @@ export function sessionsRoutes(pool: BrowserPool): Hono {
 
   // Release session
   app.post('/:id/release', async (c) => {
-    const apiKey = c.req.header('x-api-key');
+    const apiKey = resolveApiKey(c);
     try {
       getOwnedSession(pool, c.req.param('id'), apiKey);
     } catch (e: any) {
@@ -57,7 +60,7 @@ export function sessionsRoutes(pool: BrowserPool): Hono {
 
   // Switch between agent automation, human takeover, and paused control.
   app.post('/:id/control', async (c) => {
-    const apiKey = c.req.header('x-api-key');
+    const apiKey = resolveApiKey(c);
     let session;
     try {
       session = getOwnedSession(pool, c.req.param('id'), apiKey);
@@ -80,7 +83,7 @@ export function sessionsRoutes(pool: BrowserPool): Hono {
 
   // Release all or batch (only caller's sessions)
   app.post('/release', async (c) => {
-    const apiKey = c.req.header('x-api-key');
+    const apiKey = resolveApiKey(c);
     const body = await c.req.json<ReleaseRequest>().catch(() => ({}) as ReleaseRequest);
 
     if (body.ids && body.ids.length > 0) {
@@ -108,7 +111,7 @@ export function sessionsRoutes(pool: BrowserPool): Hono {
 
   // Live viewer (SSE — streams screenshots)
   app.get('/:id/live', async (c) => {
-    const apiKey = c.req.header('x-api-key');
+    const apiKey = resolveApiKey(c);
     let session;
     try {
       session = getOwnedSession(pool, c.req.param('id'), apiKey);
@@ -174,7 +177,7 @@ export function sessionsRoutes(pool: BrowserPool): Hono {
 
   // Operator event stream: metadata every second, screenshot unless sensitive mode is active.
   app.get('/:id/events', async (c) => {
-    const apiKey = c.req.header('x-api-key');
+    const apiKey = resolveApiKey(c);
     let session;
     try {
       session = getOwnedSession(pool, c.req.param('id'), apiKey);

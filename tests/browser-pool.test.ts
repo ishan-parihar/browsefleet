@@ -11,6 +11,15 @@ vi.mock('cloakbrowser', () => ({
   ensureBinary: vi.fn().mockResolvedValue('/fake/chrome'),
 }));
 
+// Keep profile bookkeeping off the real filesystem in tests.
+vi.mock('../src/routes/profiles.js', () => ({
+  profileExists: vi.fn(() => true),
+  profileUserDataDir: vi.fn(() => '/tmp/bf-test-profile'),
+  touchProfile: vi.fn(),
+  loadProfileCookies: vi.fn(() => []),
+  saveProfileCookies: vi.fn().mockResolvedValue(undefined),
+}));
+
 import * as puppeteerCore from 'puppeteer-core';
 
 function fakeBrowser() {
@@ -58,6 +67,22 @@ describe('BrowserPool', () => {
       /already exists/,
     );
     expect(session.id).toBe('dup');
+  });
+
+  // #bf-fix-2: one profile, one live session.
+  it('refuses a second concurrent session on the same profile with 409 semantics', async () => {
+    await pool.createSession({ stealth: 'none', profileId: 'prof-1' });
+    await expect(pool.createSession({ stealth: 'none', profileId: 'prof-1' })).rejects.toMatchObject({
+      status: 409,
+    });
+    expect(pool.activeCount).toBe(1);
+  });
+
+  it('allows reusing a profile after its session is released', async () => {
+    const s = await pool.createSession({ stealth: 'none', profileId: 'prof-1' });
+    await pool.releaseSession(s.id);
+    const again = await pool.createSession({ stealth: 'none', profileId: 'prof-1' });
+    expect(pool.getSession(again.id)).toBe(again);
   });
 
   it('enforces the max concurrent sessions cap', async () => {

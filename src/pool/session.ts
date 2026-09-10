@@ -13,8 +13,10 @@ export class BrowserSession {
   readonly expiresAt: Date;
   readonly timeout: number;
   readonly apiKey: string | undefined;
+  readonly saveCookiesOnRelease: boolean;
 
   private releasedAt: Date | undefined;
+  private _releasing = false;
   private expiryTimer: ReturnType<typeof setTimeout>;
   private _status: 'active' | 'released' | 'expired' | 'error' = 'active';
   private _controlMode: SessionControlMode = 'agent';
@@ -41,6 +43,11 @@ export class BrowserSession {
     this.createdAt = new Date();
     this._controlMode = options.operatorMode ? 'human' : 'agent';
     this._sensitiveMode = options.sensitiveMode ?? false;
+    // #bf-fix-3 (2026-09-10): an unconditional save-on-release lets one
+    // challenged/revoked session overwrite the profile's cookie store and
+    // turn it into a permanent re-burn engine (the linkedin-lyr #2601b
+    // incident). Minting contexts opt out instead.
+    this.saveCookiesOnRelease = options.saveCookiesOnRelease ?? true;
     this.timeout = Math.min(
       options.timeout ?? config.DEFAULT_SESSION_TIMEOUT,
       config.MAX_SESSION_TIMEOUT,
@@ -48,7 +55,12 @@ export class BrowserSession {
     this.expiresAt = new Date(this.createdAt.getTime() + this.timeout);
 
     this.expiryTimer = setTimeout(() => {
+      // #bf-fix-1 (2026-09-10): release() guards on `_status !== 'active'` and
+      // would early-return, leaking the browser child forever. Expire now
+      // closes + persists through the same path as an explicit release;
+      // onExpire (pool.releaseSession) stays idempotent via _releasing.
       this._status = 'expired';
+      void this.release();
       this.onExpire();
     }, this.timeout);
   }
@@ -138,9 +150,16 @@ export class BrowserSession {
   }
 
   async release(): Promise<void> {
-    if (this._status !== 'active') return;
-    this._status = 'released';
-    this.releasedAt = new Date();
+    // #bf-fix-1: allow the expiry path through (status 'expired' must still
+    // close the browser); block only true re-entrant calls from this method.
+    if (this._releasing) return;
+    if (this._status !== 'active' && this._status !== 'expired') return;
+    this._releasing = true;
+    const expired = this._status === 'expired';
+    if (!expired) {
+      this._status = 'released';
+      this.releasedAt = new Date();
+    }
     clearTimeout(this.expiryTimer);
 
     // Persist session cookies back to the profile so logins survive restarts.
@@ -148,7 +167,7 @@ export class BrowserSession {
     // shutdown — session cookies (expires=-1) never hit disk, so we capture
     // them via CDP and stash them in the profile's cookies.json for re-inject
     // on the next session create.
-    if (this.options.profileId) {
+    if (this.options.profileId && this.saveCookiesOnRelease) {
       try {
         const cdp = await this.browser.target().createCDPSession();
         const { cookies } = await cdp.send('Storage.getCookies');

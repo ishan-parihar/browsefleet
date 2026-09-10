@@ -29,7 +29,9 @@ describe('authMiddleware', () => {
     const app = buildApp();
     const res = await app.request('/protected/ping');
     expect(res.status).toBe(401);
-    expect(await res.json()).toEqual({ error: 'Missing x-api-key header' });
+    expect(await res.json()).toEqual({
+      error: 'Missing API key (x-api-key header, Authorization: Bearer, or ?apiKey= query param)',
+    });
   });
 
   it('returns 401 when x-api-key does not match any configured key', async () => {
