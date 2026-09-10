@@ -3,13 +3,14 @@ import path from 'node:path';
 import { existsSync, mkdirSync, writeFileSync, readFileSync, readdirSync } from 'node:fs';
 import type { BrowserPool } from '../pool/browser-pool.js';
 import { getOwnedSession } from '../utils/session-auth.js';
+import { resolveApiKey } from '../auth.js';
 
 export function filesRoutes(pool: BrowserPool): Hono {
   const app = new Hono();
 
   // Upload file to session
   app.post('/:id/files', async (c) => {
-    const apiKey = c.req.header('x-api-key');
+    const apiKey = resolveApiKey(c);
     let session;
     try {
       session = getOwnedSession(pool, c.req.param('id'), apiKey);
@@ -36,7 +37,7 @@ export function filesRoutes(pool: BrowserPool): Hono {
 
   // List files
   app.get('/:id/files', (c) => {
-    const apiKey = c.req.header('x-api-key');
+    const apiKey = resolveApiKey(c);
     let session;
     try {
       session = getOwnedSession(pool, c.req.param('id'), apiKey);
@@ -57,7 +58,7 @@ export function filesRoutes(pool: BrowserPool): Hono {
 
   // Download file
   app.get('/:id/files/:name', (c) => {
-    const apiKey = c.req.header('x-api-key');
+    const apiKey = resolveApiKey(c);
     let session;
     try {
       session = getOwnedSession(pool, c.req.param('id'), apiKey);

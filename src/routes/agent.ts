@@ -3,6 +3,7 @@ import type { BrowserPool } from '../pool/browser-pool.js';
 import { runAgent } from '../agent/agent.js';
 import type { AgentRequest } from '../agent/agent.js';
 import { getOwnedSession } from '../utils/session-auth.js';
+import { resolveApiKey } from '../auth.js';
 import { validateUrl } from '../utils/url-validator.js';
 
 export function agentRoutes(pool: BrowserPool): Hono {
@@ -14,7 +15,7 @@ export function agentRoutes(pool: BrowserPool): Hono {
     const body = await c.req.json<AgentRequest>().catch(() => null);
     if (!body?.task) return c.json({ error: 'task is required' }, 400);
 
-    const apiKey = c.req.header('x-api-key');
+    const apiKey = resolveApiKey(c);
     let session;
     try {
       session = await pool.createSession(
@@ -53,7 +54,7 @@ export function agentRoutes(pool: BrowserPool): Hono {
   // Agent on existing session — uses an already-created session
   // POST /v1/sessions/:id/agent
   app.post('/:id/agent', async (c) => {
-    const apiKey = c.req.header('x-api-key');
+    const apiKey = resolveApiKey(c);
     let session;
     try {
       session = getOwnedSession(pool, c.req.param('id'), apiKey);
@@ -86,7 +87,7 @@ export function agentRoutes(pool: BrowserPool): Hono {
     const body = await c.req.json<AgentRequest>().catch(() => null);
     if (!body?.task) return c.json({ error: 'task is required' }, 400);
 
-    const apiKey = c.req.header('x-api-key');
+    const apiKey = resolveApiKey(c);
     let session;
     try {
       session = await pool.createSession(

@@ -3,12 +3,13 @@ import type { BrowserPool } from '../pool/browser-pool.js';
 import type { ActionRequest, ActionResponse } from '../types.js';
 import { validateUrl } from '../utils/url-validator.js';
 import { getOwnedSession } from '../utils/session-auth.js';
+import { resolveApiKey } from '../auth.js';
 
 export function actionsRoutes(pool: BrowserPool): Hono {
   const app = new Hono();
 
   app.post('/:id/actions', async (c) => {
-    const apiKey = c.req.header('x-api-key');
+    const apiKey = resolveApiKey(c);
     let session;
     try {
       session = getOwnedSession(pool, c.req.param('id'), apiKey);

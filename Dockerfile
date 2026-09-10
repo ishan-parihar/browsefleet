@@ -26,6 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpango-1.0-0 \
     libcairo2 \
     xvfb \
+    xauth \
     dbus \
     ca-certificates \
     curl \
@@ -71,5 +72,5 @@ LABEL org.opencontainers.image.title="BrowseFleet" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.vendor="RJ Murray and contributors"
 
-ENTRYPOINT ["dumb-init", "--"]
+ENTRYPOINT ["dumb-init", "--", "xvfb-run", "--auto-servernum", "--server-args=-screen 0 1920x1080x24"]
 CMD ["node", "dist/server.js"]

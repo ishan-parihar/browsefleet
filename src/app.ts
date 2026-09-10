@@ -24,6 +24,7 @@ import { captchaRoutes } from './routes/captcha.js';
 import { profilesRoutes } from './routes/profiles.js';
 import { filesRoutes } from './routes/files.js';
 import { agentRoutes } from './routes/agent.js';
+import { egressRoutes } from './routes/egress.js';
 
 export function createApp(pool: BrowserPool): Hono {
   const app = new Hono();
@@ -67,6 +68,7 @@ export function createApp(pool: BrowserPool): Hono {
   app.route('/v1/sessions', filesRoutes(pool));
   app.route('/v1/agent', agentRoutes(pool));
   app.route('/v1/sessions', agentRoutes(pool));
+  app.route('/v1', egressRoutes());
 
   app.notFound((c) => c.json({ error: 'Not found' }, 404));
 

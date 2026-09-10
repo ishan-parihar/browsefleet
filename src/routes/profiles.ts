@@ -2,6 +2,8 @@ import { Hono } from 'hono';
 import { v4 as uuid } from 'uuid';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync } from 'node:fs';
 import { config } from '../config.js';
+import { logger } from '../logger.js';
+import { clearStaleProfileLocks } from '../utils/profile-lock-recovery.js';
 import type { Profile, CreateProfileRequest } from '../types.js';
 
 const profilesDir = () => `${config.dataDir}/profiles`;
@@ -77,6 +79,29 @@ export function profilesRoutes(): Hono {
     const profile = getProfileMeta(id);
     if (!profile) return c.json({ error: 'Profile not found' }, 404);
     return c.json(profile);
+  });
+
+  // Force-release a stale Chromium profile lock without touching cookies or
+  // the profile directory contents. Use when a previous browser session was
+  // killed abruptly (OOM, SIGKILL, container restart) and the SingletonLock
+  // was never released. Idempotent: deleting non-existent lockfiles is a
+  // no-op. Never deletes cookies, history, or other state the user owns.
+  app.post('/:id/unlock', (c) => {
+    const id = c.req.param('id');
+    if (!UUID_RE.test(id)) return c.json({ error: 'Invalid profile ID' }, 400);
+    if (!profileExists(id)) return c.json({ error: 'Profile not found' }, 404);
+
+    const userDataDir = profileUserDataDir(id);
+    const result = clearStaleProfileLocks(userDataDir);
+
+    logger.info({ profileId: id, removedCount: result.filesRemoved.length }, 'profile unlocked via API');
+
+    return c.json({
+      profileId: id,
+      unlocked: true,
+      filesRemoved: result.filesRemoved,
+      userDataDir,
+    });
   });
 
   app.delete('/:id', (c) => {

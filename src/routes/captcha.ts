@@ -4,6 +4,7 @@ import { config } from '../config.js';
 import { logger } from '../logger.js';
 import type { CaptchaSolveRequest, CaptchaSolveResponse } from '../types.js';
 import { getOwnedSession } from '../utils/session-auth.js';
+import { resolveApiKey } from '../auth.js';
 
 export function captchaRoutes(pool: BrowserPool): Hono {
   const app = new Hono();
@@ -13,7 +14,7 @@ export function captchaRoutes(pool: BrowserPool): Hono {
       return c.json({ error: 'CAPTCHA solving not configured. Set CAPTCHA_API_KEY.' }, 501);
     }
 
-    const apiKey = c.req.header('x-api-key');
+    const apiKey = resolveApiKey(c);
     let session;
     try {
       session = getOwnedSession(pool, c.req.param('id'), apiKey);
