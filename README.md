@@ -9,9 +9,7 @@
 Self-hosted stealth browser fleet for AI agents. REST + CDP behind one endpoint you operate. CloakBrowser Pro under the hood.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
-![LOC](https://img.shields.io/badge/LOC-4.6K-informational?style=flat-square)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript)
-![Status](https://img.shields.io/badge/Status-Active-brightgreen)
 <a href="https://github.com/ishan-parihar/browsefleet/actions/workflows/ci.yml"><img src="https://github.com/ishan-parihar/browsefleet/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
 [![Node](https://img.shields.io/badge/node-%3E%3D20-43853d.svg)](./.nvmrc)
 [![Docker](https://img.shields.io/badge/docker-ghcr.io%2Ftherjmurray%2Fbrowsefleet-2496ed.svg)](https://github.com/ishan-parihar/browsefleet/pkgs/container/browsefleet)
