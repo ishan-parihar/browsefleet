@@ -27,8 +27,8 @@ Thanks for the PR. Please fill in the sections below. Delete sections that do no
 
 - [ ] I read [CONTRIBUTING.md](../CONTRIBUTING.md).
 - [ ] I ran `npm run build` locally and it passed.
-- [ ] I ran the smoke test in [`skill.md`](../skill.md) against my branch and all five steps succeeded.
-- [ ] If this PR changed setup, run, or contribution flow, I updated [`skill.md`](../skill.md) in the same PR.
+- [ ] I ran the smoke test in [`skill.md`](../docs/skill.md) against my branch and all five steps succeeded.
+- [ ] If this PR changed setup, run, or contribution flow, I updated [`skill.md`](../docs/skill.md) in the same PR.
 - [ ] If this PR added an env var, I updated `.env.example` and `src/config.ts`.
 - [ ] If a Vitest suite exists by the time this PR opens, I added a regression test (for `fix:`) or a behavior test (for `feat:`), or stated explicitly why a test is not appropriate.
 

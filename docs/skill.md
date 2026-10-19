@@ -200,7 +200,7 @@ browsefleet/
 2. Mount it in `src/server.ts` with `app.route('/v1/<path>', <area>Routes(pool))`.
 3. Validate the request body with `zod` at the top of the handler. See `routes/sessions.ts` for the convention.
 4. Update `.env.example` if the endpoint introduces a new configuration variable.
-5. Update `skill.md` (this file) if the smoke test should now exercise it.
+5. Update `docs/skill.md` (this file) if the smoke test should now exercise it.
 6. Re-run `npm run build` and the smoke test.
 
 ### Add a new stealth tweak

@@ -4,7 +4,7 @@ Thanks for taking the time. BrowseFleet is a small, fast-moving project and good
 
 ## TL;DR
 
-1. Read [`skill.md`](./skill.md) for the exact setup, run, test, and contribution commands. It is written for both humans and AI coding agents; it is the single source of truth for how this repo works on your machine.
+1. Read [`skill.md`](docs/skill.md) for the exact setup, run, test, and contribution commands. It is written for both humans and AI coding agents; it is the single source of truth for how this repo works on your machine.
 2. Fork, branch off `master`, make your change, run `npm run build` and the smoke test in `skill.md`, commit using [Conventional Commits](https://www.conventionalcommits.org/), open a PR.
 3. A maintainer reviews. We aim for a first response within five business days. CI (Vitest, lint, build) lands in Phase 3 of the OSS transformation arc and will run automatically once configured.
 
