@@ -13,3 +13,6 @@ checklist = ["manuals with `covers` reviewed against their code"]             # 
 
 [drift]
 warn_until = "2026-11-18"  # warn until rollout+30d; after it a stale manual blocks close
+
+[card]
+architecture = "docs/architecture.md"

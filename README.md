@@ -227,6 +227,8 @@ Deeper docs live under [`docs/`](./docs/):
 - [`docs/deployment.md`](./docs/deployment.md) — Docker Compose on a $4/mo VPS, Fly.io, AWS ECS Fargate.
 - [`docs/configuration.md`](./docs/configuration.md) — every environment variable.
 
+- [Page index](docs/PAGE-INDEX.md) — every active doc and the question it owns.
+
 ## Examples
 
 Runnable examples live under [`examples/`](./examples/):
