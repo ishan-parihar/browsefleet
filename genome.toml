@@ -1,6 +1,7 @@
 # genome.toml — modules on, role → path map, module settings. Edit freely.
 # Agent entry is CLAUDE.md, not AGENTS.md: one owner per question. Do not add an AGENTS.md beside it.
 [genome]
+schema_version = 2
 modules = ["core", "agents"]
 
 [paths]
