@@ -1,4 +1,4 @@
-# Architecture
+# Architecture (browsefleet internals)
 
 BrowseFleet is one Node process that manages a pool of Chrome child processes and exposes them over HTTP. There is no auxiliary service. State lives in SQLite. The whole thing fits on a $4-per-month VPS.
 
